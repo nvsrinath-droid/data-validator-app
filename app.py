@@ -44,7 +44,7 @@ def inject_premium_css():
 
     /* Primary Container Mod */
     [data-testid="stAppViewBlockContainer"] {
-        padding-top: 1rem !important;
+        padding-top: 0rem !important;
         max-width: 1200px;
     }
 
@@ -359,25 +359,27 @@ if 'ai_config' not in st.session_state:
     st.session_state.ai_config = None
 
 # Top level heading spanning full width
-st.markdown("<div style='margin-top: 0px;'><a href='/' target='_self' style='text-decoration: none;'><h1 style='display:inline; margin: 0; padding: 0;'>🎯 TrueAlign Data</h1></a>", unsafe_allow_html=True)
-st.markdown("<p style='margin-top: 5px; margin-bottom: 0; color: #cbd5e1; font-size: 1.1rem;'>Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of AI.</p></div>", unsafe_allow_html=True)
+col_title, col_settings, col_auth, col_reset = st.columns([5.5, 1, 1.2, 1.2])
 
-col_spacer, colB, colC, colD = st.columns([6, 1, 1, 1])
-with colB:
-    st.markdown("<br>", unsafe_allow_html=True)
+with col_title:
+    st.markdown("<div style='margin-top: 0px;'><a href='/' target='_self' style='text-decoration: none;'><h1 style='display:inline; margin: 0; padding: 0;'>🎯 TrueAlign Data</h1></a>", unsafe_allow_html=True)
+    st.markdown("<p style='margin-top: 5px; margin-bottom: 0; color: #cbd5e1; font-size: 1.1rem;'>Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of AI.</p></div>", unsafe_allow_html=True)
+
+with col_settings:
+    st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
     if st.button("⚙️ Settings", use_container_width=True):
         settings_modal()
-with colC:
-    st.markdown("<br>", unsafe_allow_html=True)
+with col_auth:
+    st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
     if st.session_state.user or st.session_state.is_guest:
         if st.button("🚪 Logout", use_container_width=True):
             st.session_state.user = None
             st.session_state.is_guest = False
             st.query_params.clear()
             st.rerun()
-with colD:
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🔄 Reset Page", use_container_width=True, help="Restart the validation session"):
+with col_reset:
+    st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+    if st.button("🔄 Reset", use_container_width=True, help="Restart the validation session"):
         reset_app()
 
 # --- AUTHENTICATION INTERCEPTOR ---
@@ -467,18 +469,20 @@ def render_sql_form(key_prefix):
 
 # --- SPLASH PAGE ROUTER WITH BROWSER TAB SYNC ---
 # Grab the URL query parameters to support Browser Back/Forward buttons
-query_params = st.query_params
 
-# If the URL contains an explicit engine, ensure session state matches
-if "engine" in query_params:
-    st.session_state.execution_tier = query_params["engine"]
-# If the URL is empty but session state has an engine (e.g., from a direct button click), sync the URL
-elif st.session_state.get('execution_tier'):
-    st.query_params["engine"] = st.session_state.execution_tier
+# Sync Engine State
+engine_param = st.query_params.get("engine")
+if engine_param:
+    st.session_state.execution_tier = engine_param
+elif not engine_param and st.session_state.get('execution_tier'):
+    # The param was removed (e.g., user clicked Back to go back to the engine selector screen)
+    st.session_state.execution_tier = None
+    # We must explicitly force a reset to clear the dataframes, otherwise the engine selector flashes standard data
+    # Do this safely so we don't recursive loop
+    st.rerun()
 
 if st.session_state.get('execution_tier') is None:
     # Clear URL params if on splash page
-    st.query_params.clear()
     
     st.markdown("---")
     st.markdown("<h2 style='text-align: center; margin-bottom: 0.5rem;'>✨ Unleash AI on Your Data Validation</h2>", unsafe_allow_html=True)
