@@ -96,22 +96,21 @@ def inject_premium_css():
 
     /* Inputs, Textareas, Selectboxes */
     .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea {
-        background-color: #ffffff !important;
-        border: 2px solid #3b82f6 !important;
+        background-color: #334155 !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
         border-radius: 12px !important;
-        color: #0f172a !important;
-        font-weight: 500 !important;
+        color: white !important;
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
     }
     
     .stTextInput>div>div>input:focus, .stSelectbox>div>div>div:focus, .stTextArea>div>div>textarea:focus {
-        border-color: #2563eb !important;
-        box-shadow: 0 0 0 1px #2563eb !important;
+        border-color: #3b82f6 !important;
+        box-shadow: 0 0 0 1px #3b82f6 !important;
     }
 
     /* Text inside Inputs */
     .stTextInput>div>div>input::placeholder, .stTextArea>div>div>textarea::placeholder {
-        color: #64748b !important;
+        color: #94a3b8 !important;
     }
 
     /* Hide 'Press Enter to Submt' helper text on forms */
@@ -203,18 +202,15 @@ def inject_premium_css():
     
     /* File Uploader styling */
     [data-testid="stFileUploadDropzone"] {
-        background: #ffffff !important;
-        border: 2px dashed #3b82f6 !important;
+        background: rgba(255, 255, 255, 0.08) !important;
+        border: 2px dashed rgba(255, 255, 255, 0.3) !important;
         border-radius: 16px !important;
         padding: 30px 20px !important;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
-    [data-testid="stFileUploadDropzone"] * {
-        color: #0f172a !important;
-    }
     [data-testid="stFileUploadDropzone"]:hover {
-        background: #f8fafc !important;
-        border-color: #2563eb !important;
+        background: rgba(255, 255, 255, 0.12) !important;
+        border-color: #3b82f6 !important;
         box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2) !important;
         transform: translateY(-2px);
     }
