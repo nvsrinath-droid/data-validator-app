@@ -15,10 +15,15 @@ def inject_premium_css():
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
     /* Global Typography & Colors */
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-        background: linear-gradient(135deg, #0f172a 0%, #172554 100%);
-        color: #f8fafc;
+    html, body, [class*="css"], .stApp {
+        font-family: 'Inter', sans-serif !important;
+        background: linear-gradient(135deg, #0f172a 0%, #172554 100%) !important;
+        background-attachment: fixed !important;
+        color: #f8fafc !important;
+    }
+    
+    .stApp > header {
+        background-color: transparent !important;
     }
 
     /* Hide Streamlit Clutter */
@@ -30,11 +35,11 @@ def inject_premium_css():
     h1, h2, h3, h4, h5, h6 {
         color: #ffffff !important;
         font-weight: 600 !important;
-        letter-spacing: -0.02em;
+        letter-spacing: -0.02em !important;
     }
     
     p, span, div {
-        color: #cbd5e1;
+        color: #f8fafc;
     }
 
     /* Primary Container Mod */
@@ -45,10 +50,10 @@ def inject_premium_css():
 
     /* Splash Page Buttons as Glass Cards */
     div[data-testid="column"] button[kind="secondary"] {
-        background: rgba(255, 255, 255, 0.03) !important;
-        border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
+        background: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
         border-radius: 16px !important;
         height: 60px !important;
         color: #ffffff !important;
@@ -56,9 +61,15 @@ def inject_premium_css():
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 24px 38px 3px rgba(0, 0, 0, 0.14) !important;
     }
     
+    div[data-testid="column"] button[kind="secondary"] p {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        font-size: 1.05rem !important;
+    }
+    
     div[data-testid="column"] button[kind="secondary"]:hover {
-        background: rgba(255, 255, 255, 0.08) !important;
-        border-color: rgba(255, 255, 255, 0.2) !important;
+        background: rgba(255, 255, 255, 0.1) !important;
+        border-color: rgba(255, 255, 255, 0.3) !important;
         transform: translateY(-2px) !important;
         box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 24px 38px 3px rgba(0, 0, 0, 0.2) !important;
     }
@@ -72,6 +83,11 @@ def inject_premium_css():
         font-weight: 600 !important;
         box-shadow: 0 4px 14px 0 rgba(37, 99, 235, 0.39) !important;
     }
+    button[kind="primary"] p {
+        color: white !important;
+        font-weight: 600 !important;
+    }
+    
     button[kind="primary"]:hover {
         background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%) !important;
         box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important;
@@ -90,6 +106,11 @@ def inject_premium_css():
     .stTextInput>div>div>input:focus, .stSelectbox>div>div>div:focus, .stTextArea>div>div>textarea:focus {
         border-color: #3b82f6 !important;
         box-shadow: 0 0 0 1px #3b82f6 !important;
+    }
+
+    /* Text inside Inputs */
+    .stTextInput>div>div>input::placeholder, .stTextArea>div>div>textarea::placeholder {
+        color: #94a3b8 !important;
     }
     
     /* Dataframe container */
@@ -111,7 +132,7 @@ def inject_premium_css():
     .stTabs [data-baseweb="tab"] {
         background-color: transparent;
         border-radius: 10px;
-        color: #94a3b8;
+        color: #94a3b8 !important;
         border: none !important;
     }
     .stTabs [aria-selected="true"] {
@@ -121,10 +142,13 @@ def inject_premium_css():
 
     /* Info/Warning/Error boxes */
     .stAlert {
-        background-color: rgba(15, 23, 42, 0.8) !important;
-        backdrop-filter: blur(10px);
+        background-color: rgba(15, 23, 42, 0.5) !important;
+        backdrop-filter: blur(16px) !important;
+        -webkit-backdrop-filter: blur(16px) !important;
         border-radius: 16px !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        color: #f8fafc !important;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3) !important;
     }
     
     /* Streamlit Dialog Modal */
@@ -148,8 +172,8 @@ def inject_premium_css():
     }
     
     /* Labels */
-    label {
-        color: #94a3b8 !important;
+    label, label p, label div {
+        color: #cbd5e1 !important;
         font-weight: 500 !important;
     }
 
