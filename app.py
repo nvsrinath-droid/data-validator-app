@@ -226,6 +226,11 @@ def inject_premium_css():
         color: #3b82f6 !important;
     }
     
+    /* Hide the generic Streamlit "Limit 200MB per file" subtext under the uploader since it conflicts with business tier logic */
+    [data-testid="stFileUploadDropzone"] small {
+        display: none !important;
+    }
+    
     /* Labels */
     label, label p, label div {
         color: #cbd5e1 !important;
@@ -519,8 +524,8 @@ if st.session_state.get('execution_tier') is None:
             <p>Perfect for everyday data validation tasks.</p>
             <ul>
                 <li>Fast In-Memory Processing</li>
-                <li>Upload Excel/CSV up to ~50MB</li>
-                <li>Run DB Queries up to ~100k rows</li>
+                <li>Upload Excel/CSV up to ~200MB</li>
+                <li>Run DB Queries up to ~500k rows</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -586,7 +591,7 @@ if st.session_state.get('execution_tier') is None:
 
 
 if st.session_state.execution_tier == "standard":
-    st.markdown(f"**🟢 Active Engine:** Daily Ad-Hoc Checkups")
+    st.markdown(f"**🟢 Active Engine:** Standard Data Files")
     
     # Step 1: Data Sources Selection
     col1, col2 = st.columns(2)
@@ -865,11 +870,11 @@ if st.session_state.execution_tier == "standard":
                          st.dataframe(pd.DataFrame(missing_f2))
             
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 Restart Validation (Bottom)", use_container_width=True):
+        if st.button("🔄 Restart Validation", use_container_width=True):
             reset_app()
 
 elif st.session_state.execution_tier == "heavy":
-    st.markdown(f"**🟢 Active Engine:** Massive Log Files")
+    st.markdown(f"**🟢 Active Engine:** Massive Data Files")
     
     # Step 1: Data Sources Selection (Files Only for Heavy Engine)
     col1, col2 = st.columns(2)
@@ -1046,7 +1051,7 @@ elif st.session_state.execution_tier == "heavy":
                 with t4: st.dataframe(res.get('Exact Matches', pd.DataFrame()), use_container_width=True)
                 
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("🔄 Start New Validation (Bottom)", use_container_width=True, key="h_reset"):
+                if st.button("🔄 Restart Validation", use_container_width=True, key="h_reset"):
                     reset_app()
 
 elif st.session_state.execution_tier == "pushdown":
