@@ -6,7 +6,7 @@ import os
 from dotenv import load_dotenv
 
 # App layout and styling must be set first
-st.set_page_config(page_title="AI Data Validator", page_icon="🕵️", layout="wide")
+st.set_page_config(page_title="TrueAlign Data", page_icon="🎯", layout="wide")
 
 # Custom CSS for a clean, professional look
 st.markdown("""
@@ -33,7 +33,7 @@ api_key = os.environ.get("GEMINI_API_KEY")
 
 # --- Sidebar Configuration ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3208/3208076.png", width=50) # Generic data icon
+    st.image("https://cdn-icons-png.flaticon.com/512/1454/1454558.png", width=50) # Target icon
     st.title("Settings")
     
     if not api_key:
@@ -72,7 +72,7 @@ if 'ai_config' not in st.session_state:
 # Top level reset button
 colA, colB = st.columns([3, 1])
 with colA:
-    st.title("🕵️ Intelligent Data Validator")
+    st.title("🎯 TrueAlign Data")
     st.markdown("Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of Google Gemini.")
 with colB:
     st.markdown("<br>", unsafe_allow_html=True)
