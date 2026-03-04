@@ -112,6 +112,11 @@ def inject_premium_css():
     .stTextInput>div>div>input::placeholder, .stTextArea>div>div>textarea::placeholder {
         color: #94a3b8 !important;
     }
+
+    /* Hide 'Press Enter to Submt' helper text on forms */
+    [data-testid="InputInstructions"] {
+        display: none !important;
+    }
     
     /* Dataframe container */
     [data-testid="stDataFrame"] {
@@ -197,14 +202,28 @@ def inject_premium_css():
     
     /* File Uploader styling */
     [data-testid="stFileUploadDropzone"] {
-        background-color: rgba(255, 255, 255, 0.02) !important;
-        border: 2px dashed rgba(255, 255, 255, 0.1) !important;
+        background: linear-gradient(180deg, rgba(30, 41, 59, 0.5) 0%, rgba(15, 23, 42, 0.4) 100%) !important;
+        border: 2px dashed rgba(255, 255, 255, 0.15) !important;
         border-radius: 16px !important;
-        transition: all 0.3s ease;
+        padding: 30px 20px !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
     [data-testid="stFileUploadDropzone"]:hover {
-        background-color: rgba(255, 255, 255, 0.05) !important;
+        background: linear-gradient(180deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.7) 100%) !important;
         border-color: #3b82f6 !important;
+        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2) !important;
+        transform: translateY(-2px);
+    }
+    [data-testid="stFileUploadDropzone"] button {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+        border: none !important;
+        border-radius: 8px !important;
+        color: white !important;
+        font-weight: 500 !important;
+    }
+    [data-testid="stFileUploadDropzone"] svg {
+        fill: #3b82f6 !important;
+        color: #3b82f6 !important;
     }
     
     /* Labels */
@@ -276,13 +295,17 @@ auth_param = st.query_params.get("auth")
 if auth_param == "guest":
     st.session_state.is_guest = True
 elif auth_param == "user" and not st.session_state.user:
+    # URL says user, but memory doesn't have the user (e.g. app restart)
     del st.query_params["auth"]
 elif not auth_param and (st.session_state.is_guest or st.session_state.user):
-    # User clicked back from the app to the login screen URL
-    st.session_state.is_guest = False
-    st.session_state.user = None
-    st.query_params.clear()
-    st.rerun()
+    if len(st.query_params) == 0:
+        # User clicked back to the pure clean root URL, drop authentication
+        st.session_state.is_guest = False
+        st.session_state.user = None
+        st.rerun()
+    else:
+        # URL has other params (like engine) but lost auth param. Restore it to prevent logout
+        st.query_params["auth"] = "user" if st.session_state.user else "guest"
 
 @st.dialog("⚙️ Global AI Settings & API Keys")
 def settings_modal():
@@ -347,8 +370,8 @@ def reset_app():
             del st.session_state[k]
     # Increment key to clear file uploaders
     st.session_state.uploader_key += 1
-    # Clear URL params except auth
-    current_auth = st.query_params.get("auth")
+    # Ensure auth persists during reset
+    current_auth = "user" if st.session_state.user else ("guest" if st.session_state.is_guest else None)
     st.query_params.clear()
     if current_auth:
         st.query_params["auth"] = current_auth
@@ -379,7 +402,7 @@ with col_auth:
             st.rerun()
 with col_reset:
     st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-    if st.button("🔄 Reset", use_container_width=True, help="Restart the validation session"):
+    if st.button("🔄 Restart", use_container_width=True, help="Restart the validation session"):
         reset_app()
 
 # --- AUTHENTICATION INTERCEPTOR ---
@@ -555,7 +578,7 @@ if st.session_state.get('execution_tier') is None:
             if f_msg and (f_email or f_phone):
                 # Route simulated backend payload
                 print(f"--- NEW APP FEEDBACK ---\nTo: info@strategyeagles.com\nFrom: {f_name} ({f_email} | {f_phone})\nMessage: {f_msg}\n------------------------")
-                st.success("Thank you! Your message has been sent to info@strategyeagles.com.")
+                st.success("Thank you! We have received your feedback. Someone from our team will reach out to you soon if you have requested help.")
             else:
                 st.error("Please provide at least your email or phone and a message.")
                 
@@ -842,7 +865,7 @@ if st.session_state.execution_tier == "standard":
                          st.dataframe(pd.DataFrame(missing_f2))
             
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 Start New Validation (Bottom)", use_container_width=True):
+        if st.button("🔄 Restart Validation (Bottom)", use_container_width=True):
             reset_app()
 
 elif st.session_state.execution_tier == "heavy":
