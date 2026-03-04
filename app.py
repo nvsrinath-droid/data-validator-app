@@ -330,7 +330,6 @@ if source_1 and source_2:
                 )
             }
         )
-        )
         
         # Export Template Button
         st.download_button(
