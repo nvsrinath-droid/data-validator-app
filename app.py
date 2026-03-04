@@ -353,7 +353,7 @@ def render_sql_form(key_prefix):
 # --- SPLASH PAGE ROUTER ---
 if st.session_state.get('execution_tier') is None:
     st.markdown("---")
-    st.subheader("Select a Reconciliation Engine")
+    st.subheader("Select a Data Validation and Reconciliation Engine")
     st.markdown("Choose the processing tier that deeply matches your data volume and source.")
     
     c1, c2, c3 = st.columns(3)
