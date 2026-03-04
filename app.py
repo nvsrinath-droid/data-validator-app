@@ -21,15 +21,13 @@ def inject_premium_css():
         background-attachment: fixed !important;
         color: #f8fafc !important;
     }
-    
+    /* Keep Streamlit App Header Transparent but Visible */
     .stApp > header {
         background-color: transparent !important;
     }
 
-    /* Hide Streamlit Clutter */
-    #MainMenu {visibility: hidden;}
+    /* Hide Streamlit Default Footer */
     footer {visibility: hidden;}
-    header {display: none !important;}
 
     /* Headers */
     h1, h2, h3, h4, h5, h6 {
