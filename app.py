@@ -290,6 +290,8 @@ def reset_app():
             del st.session_state[k]
     # Increment key to clear file uploaders
     st.session_state.uploader_key += 1
+    # Clear URL params
+    st.query_params.clear()
     st.rerun()
 
 # We use session state to hold the AI's configuration so it doesn't regenerate on every button click
@@ -350,10 +352,23 @@ def render_sql_form(key_prefix):
         return {"type": "sql", "conn_str": conn_str, "query": query}
     return None
 
-# --- SPLASH PAGE ROUTER ---
+# --- SPLASH PAGE ROUTER WITH BROWSER TAB SYNC ---
+# Grab the URL query parameters to support Browser Back/Forward buttons
+query_params = st.query_params
+
+# If the URL contains an explicit engine, ensure session state matches
+if "engine" in query_params:
+    st.session_state.execution_tier = query_params["engine"]
+# If the URL is empty but session state has an engine (e.g., from a direct button click), sync the URL
+elif st.session_state.get('execution_tier'):
+    st.query_params["engine"] = st.session_state.execution_tier
+
 if st.session_state.get('execution_tier') is None:
+    # Clear URL params if on splash page
+    st.query_params.clear()
+    
     st.markdown("---")
-    st.subheader("Select a Data Validation and Reconciliation Engine")
+    st.subheader("Select a Data Validation Engine")
     st.markdown("Choose the processing tier that deeply matches your data volume and source.")
     
     c1, c2, c3 = st.columns(3)
@@ -361,18 +376,21 @@ if st.session_state.get('execution_tier') is None:
         st.info("**🚀 Daily Ad-Hoc Checkups**\n\nPerfect for standard daily tasks.\n\n- Fast In-Memory Processing\n- Upload Excel & CSV files up to ~200MB\n- Run DB Queries up to ~500k rows")
         if st.button("Launch Ad-Hoc Engine", type="primary", use_container_width=True):
             st.session_state.execution_tier = "standard"
+            st.query_params["engine"] = "standard"
             st.rerun()
             
     with c2:
         st.warning("**🏢 Massive Log Files**\n\nFor massive flat-file datasets.\n\n- Advanced Disk Streaming Engine\n- Avoids memory bottlenecks completely\n- Parses local Gigabyte flat files")
         if st.button("Launch Massive File Engine", type="primary", use_container_width=True):
             st.session_state.execution_tier = "heavy"
+            st.query_params["engine"] = "heavy"
             st.rerun()
             
     with c3:
         st.error("**🌐 Enterprise SQL Warehouses**\n\nFor enterprise SQL data warehouses.\n\n- Zero data downloading required\n- Translates AI rules natively\n- Infinite database scale")
         if st.button("Launch Enterprise SQL Engine", type="primary", use_container_width=True):
             st.session_state.execution_tier = "pushdown"
+            st.query_params["engine"] = "pushdown"
             st.rerun()
             
     st.stop()
