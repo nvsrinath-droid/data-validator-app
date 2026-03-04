@@ -29,7 +29,7 @@ def inject_premium_css():
     /* Hide Streamlit Clutter */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
+    header {display: none !important;}
 
     /* Headers */
     h1, h2, h3, h4, h5, h6 {
@@ -43,8 +43,8 @@ def inject_premium_css():
     }
 
     /* Primary Container Mod */
-    .main .block-container {
-        padding-top: 0.5rem !important;
+    [data-testid="stAppViewBlockContainer"] {
+        padding-top: 1rem !important;
         max-width: 1200px;
     }
 
@@ -271,6 +271,19 @@ if 'user' not in st.session_state:
 if 'is_guest' not in st.session_state:
     st.session_state.is_guest = False
 
+# Sync Auth State with URL for Back Button Support
+auth_param = st.query_params.get("auth")
+if auth_param == "guest":
+    st.session_state.is_guest = True
+elif auth_param == "user" and not st.session_state.user:
+    del st.query_params["auth"]
+elif not auth_param and (st.session_state.is_guest or st.session_state.user):
+    # User clicked back from the app to the login screen URL
+    st.session_state.is_guest = False
+    st.session_state.user = None
+    st.query_params.clear()
+    st.rerun()
+
 @st.dialog("⚙️ Global AI Settings & API Keys")
 def settings_modal():
     st.markdown("Add the AI models you want to use and securely store their API keys.")
@@ -334,19 +347,22 @@ def reset_app():
             del st.session_state[k]
     # Increment key to clear file uploaders
     st.session_state.uploader_key += 1
-    # Clear URL params
+    # Clear URL params except auth
+    current_auth = st.query_params.get("auth")
     st.query_params.clear()
+    if current_auth:
+        st.query_params["auth"] = current_auth
     st.rerun()
 
 # We use session state to hold the AI's configuration so it doesn't regenerate on every button click
 if 'ai_config' not in st.session_state:
     st.session_state.ai_config = None
 
-# Top level reset button
-colA, colB, colC, colD = st.columns([5, 1, 1, 1])
-with colA:
-    st.markdown("<div style='margin-top: 15px;'><a href='/' target='_self' style='text-decoration: none;'><h1 style='display:inline; margin: 0; padding: 0;'>🎯 TrueAlign Data</h1></a>", unsafe_allow_html=True)
-    st.markdown("<p style='margin-top: 5px; color: #cbd5e1; font-size: 1.1rem;'>Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of AI.</p></div>", unsafe_allow_html=True)
+# Top level heading spanning full width
+st.markdown("<div style='margin-top: 0px;'><a href='/' target='_self' style='text-decoration: none;'><h1 style='display:inline; margin: 0; padding: 0;'>🎯 TrueAlign Data</h1></a>", unsafe_allow_html=True)
+st.markdown("<p style='margin-top: 5px; margin-bottom: 0; color: #cbd5e1; font-size: 1.1rem;'>Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of AI.</p></div>", unsafe_allow_html=True)
+
+col_spacer, colB, colC, colD = st.columns([6, 1, 1, 1])
 with colB:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("⚙️ Settings", use_container_width=True):
@@ -357,6 +373,7 @@ with colC:
         if st.button("🚪 Logout", use_container_width=True):
             st.session_state.user = None
             st.session_state.is_guest = False
+            st.query_params.clear()
             st.rerun()
 with colD:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -378,6 +395,7 @@ if not st.session_state.user and not st.session_state.is_guest:
             if st.form_submit_button("Log In", type="primary", use_container_width=True):
                 if auth.authenticate_user(email_login, pass_login):
                     st.session_state.user = email_login
+                    st.query_params["auth"] = "user"
                     st.rerun()
                 else:
                     st.error("Invalid email or password.")
@@ -385,6 +403,7 @@ if not st.session_state.user and not st.session_state.is_guest:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("👋 Continue as Guest", use_container_width=True):
             st.session_state.is_guest = True
+            st.query_params["auth"] = "guest"
             st.rerun()
             
     with c_reg:
@@ -522,18 +541,19 @@ if st.session_state.get('execution_tier') is None:
     st.markdown("Have feedback, feature requests, or need enterprise support? Let us know!")
     
     with st.form("feedback_form"):
-        c_name, c_contact = st.columns(2)
-        f_name = c_name.text_input("Name (Optional)")
-        f_contact = c_contact.text_input("Email / Phone Number")
-        f_msg = st.text_area("Message / Feature Request", height=100)
+        c_name, c_email, c_phone = st.columns(3)
+        f_name = c_name.text_input("Name")
+        f_email = c_email.text_input("Email")
+        f_phone = c_phone.text_input("Phone Number")
+        f_msg = st.text_area("Message / Feedback", height=100)
         
         if st.form_submit_button("📨 Send Feedback", type="primary"):
-            if f_msg and f_contact:
+            if f_msg and (f_email or f_phone):
                 # Route simulated backend payload
-                print(f"--- NEW APP FEEDBACK ---\nTo: info@strategyeagles.com\nFrom: {f_name} ({f_contact})\nMessage: {f_msg}\n------------------------")
+                print(f"--- NEW APP FEEDBACK ---\nTo: info@strategyeagles.com\nFrom: {f_name} ({f_email} | {f_phone})\nMessage: {f_msg}\n------------------------")
                 st.success("Thank you! Your message has been sent to info@strategyeagles.com.")
             else:
-                st.error("Please provide at least your contact info and a message.")
+                st.error("Please provide at least your email or phone and a message.")
                 
     st.stop()
 
@@ -552,7 +572,7 @@ if st.session_state.execution_tier == "standard":
             source_1 = render_sql_form(f"src1_{st.session_state.uploader_key}")
 
     with col2:
-        st.subheader("📄 External Data (To Compare)")
+        st.subheader("📄 Target Data (To Compare)")
         source_type_2 = st.radio("Source 2 Type", ["File Upload", "SQL Database"], horizontal=True, key=f"src2_type_{st.session_state.uploader_key}")
         if source_type_2 == "File Upload":
             source_2 = st.file_uploader("Upload File 2", type=["csv", "xlsx"], key=f"file2_{st.session_state.uploader_key}")
@@ -831,7 +851,7 @@ elif st.session_state.execution_tier == "heavy":
         source_1 = st.file_uploader("Upload MASSIVE File 1", type=["csv"], key=f"hfile1_{st.session_state.uploader_key}")
 
     with col2:
-        st.subheader("📄 External Data (To Compare)")
+        st.subheader("📄 Target Data (To Compare)")
         source_2 = st.file_uploader("Upload MASSIVE File 2", type=["csv"], key=f"hfile2_{st.session_state.uploader_key}")
 
     if source_1 and source_2:
