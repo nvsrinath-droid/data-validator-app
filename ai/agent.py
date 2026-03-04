@@ -1,0 +1,58 @@
+import os
+from google import genai
+from google.genai import types
+import json
+from core.schemas import ValidationConfig
+
+class GeminiAgent:
+    """Interacts with the Gemini API to suggest configurations."""
+    
+    def __init__(self, api_key: str = None):
+        if not api_key:
+            api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("Gemini API key is required. Set it in .env or pass it directly.")
+        
+        # Initialize the new genai client
+        self.client = genai.Client(api_key=api_key)
+        self.model_name = 'gemini-2.5-flash'
+        
+    def suggest_configuration(self, file1_sample: str, file2_sample: str) -> ValidationConfig:
+        """
+        Takes string representations of the file samples and uses Gemini to 
+        suggest a configuration schema mapping the files.
+        """
+        prompt = f"""
+        You are an expert data analyst AI. Let's build a data validation agent. 
+        I want to compare two source files (File 1 and File 2) for missing rows and mismatched values.
+        
+        Here is a sample of File 1 (the source of truth):
+        {file1_sample}
+        
+        Here is a sample of File 2 (the external file):
+        {file2_sample}
+        
+        Please analyze these samples and suggest a configuration.
+        1. Identify the logical Primary Key(s) to join these datasets. If one file has a column like 'EmpID' and the other has 'Employee Identifier', those should be the primary keys.
+        2. Create a column mapping dictionary where the keys are the column names in File 1, and the values are the corresponding column names in File 2.
+        
+        Respond ONLY with a valid JSON object matching this schema:
+        {{
+            "primary_keys": ["KeyColNameOnFile1"],
+            "column_mappings": [{{"file1_column": "File1ColA", "file2_column": "File2ColA"}}]
+        }}
+        """
+
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=ValidationConfig,
+                temperature=0.1
+            ),
+        )
+
+        # Parse the response into our Pydantic model
+        config_data = json.loads(response.text)
+        return ValidationConfig(**config_data)
