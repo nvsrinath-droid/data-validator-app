@@ -128,7 +128,7 @@ if file1 and file2:
         file1_cols = [""] + conn1.get_sample_data(1).columns.tolist()
         file2_cols = [""] + conn2.get_sample_data(1).columns.tolist()
         
-        mapping_data = [{"File 1 Column": m.file1_column, "File 2 Column": m.file2_column} for m in config.column_mappings]
+        mapping_data = [{"File 1 Column": m.file1_column, "File 2 Column": m.file2_column, "Validation Rule (Optional)": m.validation_rule or ""} for m in config.column_mappings]
         mapping_df = pd.DataFrame(mapping_data)
 
         # Configure the dataframe to use dropdowns
@@ -146,6 +146,11 @@ if file1 and file2:
                     "Target Column (File 2)",
                     options=file2_cols,
                     required=False
+                ),
+                "Validation Rule (Optional)": st.column_config.TextColumn(
+                    "Validation Rule (Optional)",
+                    help="e.g., 'Must be within $5' or 'Ignore case'",
+                    default=""
                 )
             }
         )
@@ -155,12 +160,18 @@ if file1 and file2:
             with st.spinner('Comparing all rows...'):
                 # Rebuild config object from the UI edited state, safely dropping empty/deleted rows
                 new_mappings = []
+                rules_dict = {}
                 for index, row in edited_mapping_df.iterrows():
                     c1 = str(row.get('File 1 Column', '')).strip()
                     c2 = str(row.get('File 2 Column', '')).strip()
+                    rule = str(row.get('Validation Rule (Optional)', '')).strip()
+                    if rule == 'nan' or rule == 'None': rule = ""
+                    
                     # Only map if both columns are provided and not NaN
                     if c1 and c2 and c1.lower() != 'nan' and c2.lower() != 'nan' and c1 != 'None' and c2 != 'None':
-                        new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2))
+                        new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
+                        if rule:
+                            rules_dict[c1] = rule
                 
                 final_config = ValidationConfig(
                     primary_keys=pk_cols,
@@ -168,8 +179,15 @@ if file1 and file2:
                     ignore_columns=[]
                 )
                 
+                # Execute AI Logic if rules exist
+                rule_code = None
+                if rules_dict:
+                    st.toast("Generating custom validation rules with Gemini...", icon='🧠')
+                    agent = GeminiAgent(api_key=api_key)
+                    rule_code = agent.generate_rule_evaluator_code(rules_dict)
+                
                 # Execute Core Logic
-                comparator = DataComparator(final_config)
+                comparator = DataComparator(final_config, rule_code=rule_code)
                 st.session_state.df1_full = conn1.read_data()
                 st.session_state.df2_full = conn2.read_data()
                 st.session_state.results = comparator.compare(st.session_state.df1_full, st.session_state.df2_full)

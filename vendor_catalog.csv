@@ -1,0 +1,11 @@
+ID,Product_Desc,Cat,Unit_Cost,ProductStatus
+PRD-001,Item Model 1,Clothing,204.0,ACTIVE
+PRD-002,ITEM MODEL 2,Electronics,316.0,active
+PRD-003,Item Model 3,Electronics,127.0,ACTIVE
+PRD-004,Item Model 4,Electronics,78.5,ACTIVE
+PRD-005,Item Model 5,Electronics,138.0,ACTIVE
+PRD-006,Item Model 6,Home,206.0,ACTIVE
+PRD-007,Item Model 7,Home,367.2,ACTIVE
+PRD-008,Item Model 8,Home,285.0,ACTIVE
+PRD-009,Item Model 9,Electronics,735.0,ACTIVE
+PRD-010,Item Model 10,Home,260.0,ACTIVE

@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 class ColumnMap(BaseModel):
     file1_column: str
     file2_column: str
+    validation_rule: Optional[str] = None
 
 class ValidationConfig(BaseModel):
     """Schema for the validation configuration."""

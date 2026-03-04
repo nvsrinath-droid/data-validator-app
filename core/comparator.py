@@ -6,9 +6,22 @@ from .schemas import ValidationConfig
 class DataComparator:
     """Core logic engine for comparing two DataFrames."""
     
-    def __init__(self, config: ValidationConfig):
+    def __init__(self, config: ValidationConfig, rule_code: str = None):
         self.config = config
+        self.rule_code = rule_code
+        self.evaluate_rules_func = None
         
+        if self.rule_code:
+            # Safely compile the AI generated function string into an actual python function
+            local_vars = {}
+            try:
+                # Provide pandas to the local namespace the AI might use
+                exec_globals = {"pd": pd, "np": np}
+                exec(self.rule_code, exec_globals, local_vars)
+                self.evaluate_rules_func = local_vars.get('evaluate_rules')
+            except Exception as e:
+                print(f"Error compiling AI validation rules: {e}")
+
     def compare(self, df1: pd.DataFrame, df2: pd.DataFrame) -> Dict[str, Any]:
         """
         Main comparison method. 
@@ -86,26 +99,57 @@ class DataComparator:
             # They must end in _f1, have a corresponding _f2, and not be a primary key
             cols_to_compare = [c.replace('_f1', '') for c in both_df.columns if c.endswith('_f1') and f"{c.replace('_f1', '')}_f2" in both_df.columns]
 
+            # Build a dictionary to check which columns have rules and which should fall back to exact match
+            mapped_cols_with_rules = {m.file1_column: m.validation_rule for m in self.config.column_mappings if m.validation_rule}
+
             for index, row in both_df.iterrows():
                 row_mismatches = []
+                
+                # Check column by column
                 for col in cols_to_compare:
                     val1 = row[f"{col}_f1"]
                     val2 = row[f"{col}_f2"]
                     
-                    # Handle NaN/Null comparisons gracefully
-                    # If both are null/nan, they are equal
+                    # If this specific column has an AI validation rule, we skip exact matching for this column.
+                    # It will be evaluated in the AI function below.
+                    if col in mapped_cols_with_rules:
+                        continue 
+                        
+                    # Default Exact Match Logic (if no rule is specified)
                     if pd.isna(val1) and pd.isna(val2):
                         continue
                     
-                    # If they don't match exactly
                     if val1 != val2:
                         row_mismatches.append({
                             "column": col,
                             "file1_value": val1,
-                            "file2_value": val2
+                            "file2_value": val2,
+                            "error": "Exact match failed"
                         })
                 
-                # If we found any mismatches for this row, add it to our report
+                # Check AI-generated Validation Rules across the entire row
+                if self.evaluate_rules_func:
+                    try:
+                        rule_errors = self.evaluate_rules_func(row)
+                        if rule_errors and isinstance(rule_errors, list):
+                            # Add these AI errors into the mismatch report
+                            for err_msg in rule_errors:
+                                # We try to extract the column name from the error, or just dump it
+                                row_mismatches.append({
+                                    "column": "Rule Violation",
+                                    "file1_value": "N/A",
+                                    "file2_value": "N/A",
+                                    "error": err_msg
+                                })
+                    except Exception as e:
+                        row_mismatches.append({
+                            "column": "Rule Execution Error",
+                            "file1_value": "Error",
+                            "file2_value": "Error",
+                            "error": str(e)
+                        })
+
+                # If we found any mismatches for this row (either exact match or rule based), add it to our report
                 if row_mismatches:
                     pk_values = {pk: row[pk] for pk in self.config.primary_keys}
                     results["mismatches"].append({

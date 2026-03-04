@@ -56,3 +56,38 @@ class GeminiAgent:
         # Parse the response into our Pydantic model
         config_data = json.loads(response.text)
         return ValidationConfig(**config_data)
+
+    def generate_rule_evaluator_code(self, rules_dict: dict) -> str:
+        """
+        Takes a dictionary mapping column names to plain English validation rules.
+        Uses Gemini to generate a Python function `def evaluate_rules(row):` that 
+        takes a Pandas Row and returns a list of error strings (or empty list if passed).
+        """
+        prompt = f"""
+        You are an expert Python data engineer. I have a pandas dataframe containing data from two different files.
+        For a given row, the data from File 1 is accessed via `row['ColumnName_f1']` and File 2 via `row['ColumnName_f2']`.
+        
+        The user has provided the following plain-English validation rules for specific columns:
+        {json.dumps(rules_dict, indent=2)}
+        
+        Write a robust Python function named `evaluate_rules(row)` that executes these rules.
+        - Handle NaN or Null values gracefully (e.g., using `pd.isna()`).
+        - The function must return a list of error message strings. If all rules pass, return an empty list `[]`.
+        - Format the error message like: "ColumnName rule Failed: Expected X but got Y".
+        - Do not include any explanations, imports, or markdown formatting like ```python. Just the raw python code.
+        """
+
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+        )
+
+        code = response.text.strip()
+        if code.startswith("```python"):
+            code = code[9:]
+        if code.startswith("```"):
+            code = code[3:]
+        if code.endswith("```"):
+            code = code[:-3]
+            
+        return code.strip()
