@@ -8,17 +8,156 @@ from dotenv import load_dotenv
 # App layout and styling must be set first
 st.set_page_config(page_title="TrueAlign Data", page_icon="🎯", layout="wide")
 
-# Custom CSS for a clean, professional look
-st.markdown("""
+def inject_premium_css():
+    st.markdown("""
     <style>
-    .main { background-color: #f8f9fa; }
-    h1 { color: #1e3a8a; }
-    .stButton>button { width: 100%; border-radius: 5px; font-weight: bold; }
-    .stDownloadButton>button { background-color: #10b981; color: white; }
-    .stDownloadButton>button:hover { background-color: #059669; color: white; }
-    div[data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #e5e7eb; }
+    /* Google Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    /* Global Typography & Colors */
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+        background: linear-gradient(135deg, #0f172a 0%, #172554 100%);
+        color: #f8fafc;
+    }
+
+    /* Hide Streamlit Clutter */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Headers */
+    h1, h2, h3, h4, h5, h6 {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        letter-spacing: -0.02em;
+    }
+    
+    p, span, div {
+        color: #cbd5e1;
+    }
+
+    /* Primary Container Mod */
+    .main .block-container {
+        padding-top: 2rem !important;
+        max-width: 1200px;
+    }
+
+    /* Splash Page Buttons as Glass Cards */
+    div[data-testid="column"] button[kind="secondary"] {
+        background: rgba(255, 255, 255, 0.03) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-radius: 16px !important;
+        height: 60px !important;
+        color: #ffffff !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 24px 38px 3px rgba(0, 0, 0, 0.14) !important;
+    }
+    
+    div[data-testid="column"] button[kind="secondary"]:hover {
+        background: rgba(255, 255, 255, 0.08) !important;
+        border-color: rgba(255, 255, 255, 0.2) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 24px 38px 3px rgba(0, 0, 0, 0.2) !important;
+    }
+    
+    /* Primary Call to Action Buttons */
+    button[kind="primary"] {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+        border: none !important;
+        border-radius: 12px !important;
+        color: white !important;
+        font-weight: 600 !important;
+        box-shadow: 0 4px 14px 0 rgba(37, 99, 235, 0.39) !important;
+    }
+    button[kind="primary"]:hover {
+        background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%) !important;
+        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important;
+        transform: translateY(-1px) !important;
+    }
+
+    /* Inputs, Textareas, Selectboxes */
+    .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea {
+        background-color: rgba(15, 23, 42, 0.6) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 12px !important;
+        color: white !important;
+        transition: border-color 0.2s ease;
+    }
+    
+    .stTextInput>div>div>input:focus, .stSelectbox>div>div>div:focus, .stTextArea>div>div>textarea:focus {
+        border-color: #3b82f6 !important;
+        box-shadow: 0 0 0 1px #3b82f6 !important;
+    }
+    
+    /* Dataframe container */
+    [data-testid="stDataFrame"] {
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: rgba(255, 255, 255, 0.03);
+        padding: 8px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: transparent;
+        border-radius: 10px;
+        color: #94a3b8;
+        border: none !important;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: rgba(255, 255, 255, 0.1) !important;
+        color: white !important;
+    }
+
+    /* Info/Warning/Error boxes */
+    .stAlert {
+        background-color: rgba(15, 23, 42, 0.8) !important;
+        backdrop-filter: blur(10px);
+        border-radius: 16px !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    }
+    
+    /* Streamlit Dialog Modal */
+    div[role="dialog"] {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 24px;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    
+    /* File Uploader styling */
+    [data-testid="stFileUploadDropzone"] {
+        background-color: rgba(255, 255, 255, 0.02) !important;
+        border: 2px dashed rgba(255, 255, 255, 0.1) !important;
+        border-radius: 16px !important;
+        transition: all 0.3s ease;
+    }
+    [data-testid="stFileUploadDropzone"]:hover {
+        background-color: rgba(255, 255, 255, 0.05) !important;
+        border-color: #3b82f6 !important;
+    }
+    
+    /* Labels */
+    label {
+        color: #94a3b8 !important;
+        font-weight: 500 !important;
+    }
+
     </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+
+# Inject the premium Apple-style aesthetics
+inject_premium_css()
 
 # Important imports
 from connectors.file_connector import FileConnector
