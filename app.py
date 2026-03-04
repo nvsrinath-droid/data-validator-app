@@ -60,26 +60,58 @@ if 'stored_keys' not in st.session_state:
         "MISTRAL_API_KEY": os.environ.get("MISTRAL_API_KEY", "")
     }
 
+# Initialize Session State for user's selected models
+if 'user_configured_models' not in st.session_state:
+    st.session_state.user_configured_models = []
+
 @st.dialog("⚙️ Global AI Settings & API Keys")
 def settings_modal():
-    st.markdown("Store your API keys here. They are saved securely in your active session.")
+    st.markdown("Add the AI models you want to use and securely store their API keys.")
     
-    # Create input fields for each major provider
-    for key_name in st.session_state.stored_keys.keys():
-        provider_name = key_name.split('_')[0].title()
-        
-        # Inject current value if it exists
-        current_val = st.session_state.stored_keys[key_name]
-        
-        new_val = st.text_input(
-            f"{provider_name} API Key", 
-            value=current_val, 
-            type="password", 
-            key=f"input_{key_name}"
-        )
-        
-        if new_val != current_val:
-            st.session_state.stored_keys[key_name] = new_val
+    # Model Adder
+    c_add_1, c_add_2 = st.columns([3, 1])
+    with c_add_1:
+        # Only show models not already added
+        available_to_add = [m for m in AVAILABLE_MODELS.keys() if m not in st.session_state.user_configured_models]
+        model_to_add = st.selectbox("Select a model to add", available_to_add, label_visibility="collapsed")
+    with c_add_2:
+        if st.button("➕ Add Model", use_container_width=True, disabled=len(available_to_add)==0):
+            if model_to_add:
+                st.session_state.user_configured_models.append(model_to_add)
+                st.rerun()
+                
+    st.markdown("---")
+    
+    # Scrollable container for the configured models
+    with st.container(height=350):
+        if not st.session_state.user_configured_models:
+            st.info("No AI models configured yet. Please add one from the dropdown above.")
+            
+        for idx, model_name in enumerate(st.session_state.user_configured_models):
+            litellm_model_str, required_env_key = AVAILABLE_MODELS[model_name]
+            provider_name = required_env_key.split('_')[0].title()
+            
+            c_label, c_remove = st.columns([4, 1])
+            c_label.markdown(f"**{model_name}**")
+            if c_remove.button("🗑️ Remove", key=f"rm_{model_name}_{idx}"):
+                st.session_state.user_configured_models.remove(model_name)
+                st.rerun()
+                
+            # Key input
+            current_val = st.session_state.stored_keys.get(required_env_key, "")
+            new_val = st.text_input(
+                f"{provider_name} API Key", 
+                value=current_val, 
+                type="password", 
+                key=f"input_{required_env_key}_{idx}",
+                label_visibility="collapsed",
+                placeholder=f"Enter {required_env_key}"
+            )
+            
+            if new_val != current_val:
+                st.session_state.stored_keys[required_env_key] = new_val
+                
+            st.divider()
             
     if st.button("Save & Close", type="primary", use_container_width=True):
         st.rerun()
@@ -177,10 +209,14 @@ if source_1 and source_2:
     st.markdown("---")
     st.subheader("🧠 Step 2: Select AI Model & Map Schema")
     
+    if not st.session_state.user_configured_models:
+        st.warning("⚠️ No AI Models configured. Please click the ⚙️ Settings menu (top right) to add a model and API key.")
+        st.stop()
+        
     # Pull model selection out of the sidebar and into the main flow
     c_model, _ = st.columns([1, 2])
     with c_model:
-        selected_model_display = st.selectbox("Active AI Model", list(AVAILABLE_MODELS.keys()))
+        selected_model_display = st.selectbox("Active AI Model", st.session_state.user_configured_models)
         litellm_model_str, required_env_key = AVAILABLE_MODELS[selected_model_display]
         active_api_key = st.session_state.stored_keys.get(required_env_key, "")
 
