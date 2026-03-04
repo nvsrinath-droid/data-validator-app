@@ -124,7 +124,8 @@ class DataComparator:
                             "column": col,
                             "file1_value": val1,
                             "file2_value": val2,
-                            "error": "Exact match failed"
+                            "error": "Exact match failed",
+                            "validation_rule": ""
                         })
                 
                 # Check AI-generated Validation Rules across the entire row
@@ -133,20 +134,23 @@ class DataComparator:
                         rule_errors = self.evaluate_rules_func(row)
                         if rule_errors and isinstance(rule_errors, list):
                             # Add these AI errors into the mismatch report
-                            for err_msg in rule_errors:
-                                # We try to extract the column name from the error, or just dump it
-                                row_mismatches.append({
-                                    "column": "Rule Violation",
-                                    "file1_value": "N/A",
-                                    "file2_value": "N/A",
-                                    "error": err_msg
-                                })
+                            for err_dict in rule_errors:
+                                if isinstance(err_dict, dict):
+                                    col_name = err_dict.get('column', 'Rule Violation')
+                                    row_mismatches.append({
+                                        "column": col_name,
+                                        "file1_value": err_dict.get('file1_value', 'N/A'),
+                                        "file2_value": err_dict.get('file2_value', 'N/A'),
+                                        "error": err_dict.get('error', 'Rule violation'),
+                                        "validation_rule": mapped_cols_with_rules.get(col_name, "")
+                                    })
                     except Exception as e:
                         row_mismatches.append({
                             "column": "Rule Execution Error",
                             "file1_value": "Error",
                             "file2_value": "Error",
-                            "error": str(e)
+                            "error": str(e),
+                            "validation_rule": ""
                         })
 
                 # If we found any mismatches for this row (either exact match or rule based), add it to our report

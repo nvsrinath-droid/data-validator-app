@@ -61,7 +61,7 @@ class GeminiAgent:
         """
         Takes a dictionary mapping column names to plain English validation rules.
         Uses Gemini to generate a Python function `def evaluate_rules(row):` that 
-        takes a Pandas Row and returns a list of error strings (or empty list if passed).
+        takes a Pandas Row and returns a list of dictionaries (or empty list if passed).
         """
         prompt = f"""
         You are an expert Python data engineer. I have a pandas dataframe containing data from two different files.
@@ -71,9 +71,10 @@ class GeminiAgent:
         {json.dumps(rules_dict, indent=2)}
         
         Write a robust Python function named `evaluate_rules(row)` that executes these rules.
-        - Handle NaN or Null values gracefully (e.g., using `pd.isna()`).
-        - The function must return a list of error message strings. If all rules pass, return an empty list `[]`.
-        - Format the error message like: "ColumnName rule Failed: Expected X but got Y".
+        - Handle NaN or Null values gracefully.
+        - The function MUST return a list of dictionaries. If all rules pass, return an empty list `[]`.
+        - Each dictionary must have exactly this format: 
+          {{"column": "TheColumnName", "error": "Detailed reason it failed", "file1_value": row['TheColumnName_f1'], "file2_value": row['TheColumnName_f2']}}
         - Do not include any explanations, imports, or markdown formatting like ```python. Just the raw python code.
         """
 

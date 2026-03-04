@@ -215,23 +215,28 @@ if file1 and file2:
             st.markdown("---")
             
             st.markdown("### Detailed Exceptions")
+            
+            def get_flattened_mismatches_df(mismatches_list):
+                flat_data = []
+                for item in mismatches_list:
+                    pk_str = str(item["primary_keys"])
+                    for diff in item["differences"]:
+                        flat_data.append({
+                            "Primary Key": pk_str,
+                            "Column": diff["column"],
+                            "File 1 Value": diff["file1_value"],
+                            "File 2 Value": diff["file2_value"],
+                            "Validation Rule": diff.get("validation_rule", ""),
+                            "Remarks": diff.get("error", "Exact match failed")
+                        })
+                return pd.DataFrame(flat_data)
+
             # We need a helper to generate CSV strings for download
             def to_csv_download(data_dict_list, is_mismatch=False):
                 if not data_dict_list: return None
                 
                 if is_mismatch:
-                     # Flatten mismatch structure
-                     flat_data = []
-                     for item in data_dict_list:
-                        pk_str = str(item["primary_keys"])
-                        for diff in item["differences"]:
-                            flat_data.append({
-                                "Primary Key": pk_str,
-                                "Column": diff["column"],
-                                "File 1 Value": diff["file1_value"],
-                                "File 2 Value": diff["file2_value"]
-                            })
-                     return pd.DataFrame(flat_data).to_csv(index=False).encode('utf-8')
+                     return get_flattened_mismatches_df(data_dict_list).to_csv(index=False).encode('utf-8')
                 else:
                      return pd.DataFrame(data_dict_list).to_csv(index=False).encode('utf-8')
 
@@ -242,9 +247,10 @@ if file1 and file2:
                 mismatches = results.get('mismatches', [])
                 st.metric("Total Mismatched Rows", len(mismatches))
                 if mismatches:
-                    csv_data = to_csv_download(mismatches, is_mismatch=True)
+                    flat_df = get_flattened_mismatches_df(mismatches)
+                    csv_data = flat_df.to_csv(index=False).encode('utf-8')
                     st.download_button("Download Mismatches CSV", data=csv_data, file_name="mismatches.csv", mime="text/csv")
-                    st.dataframe(pd.DataFrame(mismatches).astype(str)) # Easy viewer
+                    st.dataframe(flat_df.astype(str)) # Easy viewer
             
             with tab2:
                  missing_f1 = results.get('missing_in_file1', [])
