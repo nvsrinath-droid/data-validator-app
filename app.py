@@ -122,7 +122,7 @@ if 'uploader_key' not in st.session_state:
 
 def reset_app():
     # Clear the generated data to restart the process
-    for k in ['ai_config', 'results', 'df1_full', 'df2_full']:
+    for k in ['ai_config', 'results', 'df1_full', 'df2_full', 'execution_tier']:
         if k in st.session_state:
             del st.session_state[k]
     # Increment key to clear file uploaders
@@ -187,278 +187,307 @@ def render_sql_form(key_prefix):
         return {"type": "sql", "conn_str": conn_str, "query": query}
     return None
 
-# Step 1: Data Sources Selection
-col1, col2 = st.columns(2)
-with col1:
-    st.subheader("📁 Source Data (System of Record)")
-    source_type_1 = st.radio("Source 1 Type", ["File Upload", "SQL Database"], horizontal=True, key=f"src1_type_{st.session_state.uploader_key}")
-    if source_type_1 == "File Upload":
-        source_1 = st.file_uploader("Upload File 1", type=["csv", "xlsx"], key=f"file1_{st.session_state.uploader_key}")
-    else:
-        source_1 = render_sql_form(f"src1_{st.session_state.uploader_key}")
-
-with col2:
-    st.subheader("📄 External Data (To Compare)")
-    source_type_2 = st.radio("Source 2 Type", ["File Upload", "SQL Database"], horizontal=True, key=f"src2_type_{st.session_state.uploader_key}")
-    if source_type_2 == "File Upload":
-        source_2 = st.file_uploader("Upload File 2", type=["csv", "xlsx"], key=f"file2_{st.session_state.uploader_key}")
-    else:
-        source_2 = render_sql_form(f"src2_{st.session_state.uploader_key}")
-
-if source_1 and source_2:
+# --- SPLASH PAGE ROUTER ---
+if st.session_state.get('execution_tier') is None:
     st.markdown("---")
-    st.subheader("🧠 Step 2: Select AI Model & Map Schema")
+    st.subheader("How would you like to validate today?")
+    st.markdown("Select an execution engine based on your data scale.")
     
-    if not st.session_state.user_configured_models:
-        st.warning("⚠️ No AI Models configured. Please click the ⚙️ Settings menu (top right) to add a model and API key.")
-        st.stop()
-        
-    # Pull model selection out of the sidebar and into the main flow
-    c_model, _ = st.columns([1, 2])
-    with c_model:
-        selected_model_display = st.selectbox("Active AI Model", st.session_state.user_configured_models)
-        litellm_model_str, required_env_key = AVAILABLE_MODELS[selected_model_display]
-        active_api_key = st.session_state.stored_keys.get(required_env_key, "")
-
-    if not active_api_key:
-         st.warning(f"⚠️ You must configure your `{required_env_key}` in the ⚙️ Settings menu (top right) to use {selected_model_display}.")
-         st.stop()
-         
-    # Init connectors dynamically based on the user's choice
-    def init_connector(source_data):
-        if isinstance(source_data, dict) and source_data.get('type') == 'sql':
-            return SQLConnector(source_data['conn_str'], source_data['query'])
-        else:
-            return FileConnector(source_data)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.info("**🚀 Standard Engine**\n\nPerfect for daily ad-hoc tasks.\n\n- Powered by Pandas (In-Memory RAM)\n- Upload Excel & CSV files up to ~200MB\n- Run DB Queries up to ~500k rows")
+        if st.button("Launch Standard Engine", use_container_width=True):
+            st.session_state.execution_tier = "standard"
+            st.rerun()
             
-    try:
-        conn1 = init_connector(source_1)
-        conn2 = init_connector(source_2)
-    except Exception as e:
-        st.error(f"Error connecting to data source: {str(e)}")
-        st.stop()
+    with c2:
+        st.warning("**🏢 Heavy File Engine** (In Development)\n\nFor massive flat-file datasets.\n\n- Powered by local DuckDB\n- Avoids RAM bottlenecks completely\n- Parses local Gigabyte flat files")
+        if st.button("Launch Heavy Engine", disabled=True, use_container_width=True, help="Coming soon from your AI developer"):
+            pass
+            
+    with c3:
+        st.error("**🌐 DB Pushdown Engine** (In Development)\n\nFor enterprise SQL data warehouses.\n\n- Zero data downloading required\n- Translates AI rules to native SQL\n- Infinite database scale (Snowflake)")
+        if st.button("Launch Pushdown Engine", disabled=True, use_container_width=True, help="Coming soon from your AI developer"):
+            pass
+            
+    st.stop()
+
+
+if st.session_state.execution_tier == "standard":
+    st.markdown(f"**🟢 Active Engine:** Standard (Pandas In-Memory)")
     
-    # UI for choosing between AI Generation or Loading a Template
-    c_generate, c_upload = st.columns(2)
+    # Step 1: Data Sources Selection
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("📁 Source Data (System of Record)")
+        source_type_1 = st.radio("Source 1 Type", ["File Upload", "SQL Database"], horizontal=True, key=f"src1_type_{st.session_state.uploader_key}")
+        if source_type_1 == "File Upload":
+            source_1 = st.file_uploader("Upload File 1", type=["csv", "xlsx"], key=f"file1_{st.session_state.uploader_key}")
+        else:
+            source_1 = render_sql_form(f"src1_{st.session_state.uploader_key}")
+
+    with col2:
+        st.subheader("📄 External Data (To Compare)")
+        source_type_2 = st.radio("Source 2 Type", ["File Upload", "SQL Database"], horizontal=True, key=f"src2_type_{st.session_state.uploader_key}")
+        if source_type_2 == "File Upload":
+            source_2 = st.file_uploader("Upload File 2", type=["csv", "xlsx"], key=f"file2_{st.session_state.uploader_key}")
+        else:
+            source_2 = render_sql_form(f"src2_{st.session_state.uploader_key}")
+
+    if source_1 and source_2:
+        st.markdown("---")
+        st.subheader("🧠 Step 2: Select AI Model & Map Schema")
     
-    with c_generate:
-        # Generate Config Button
-        if st.button(f"✨ Auto-Map with {selected_model_display}", type="primary", use_container_width=True):
-            with st.spinner(f'{selected_model_display} is reading your structured data and building a mapping schema...'):
+        if not st.session_state.user_configured_models:
+            st.warning("⚠️ No AI Models configured. Please click the ⚙️ Settings menu (top right) to add a model and API key.")
+            st.stop()
+        
+        # Pull model selection out of the sidebar and into the main flow
+        c_model, _ = st.columns([1, 2])
+        with c_model:
+            selected_model_display = st.selectbox("Active AI Model", st.session_state.user_configured_models)
+            litellm_model_str, required_env_key = AVAILABLE_MODELS[selected_model_display]
+            active_api_key = st.session_state.stored_keys.get(required_env_key, "")
+
+        if not active_api_key:
+             st.warning(f"⚠️ You must configure your `{required_env_key}` in the ⚙️ Settings menu (top right) to use {selected_model_display}.")
+             st.stop()
+         
+        # Init connectors dynamically based on the user's choice
+        def init_connector(source_data):
+            if isinstance(source_data, dict) and source_data.get('type') == 'sql':
+                return SQLConnector(source_data['conn_str'], source_data['query'])
+            else:
+                return FileConnector(source_data)
+            
+        try:
+            conn1 = init_connector(source_1)
+            conn2 = init_connector(source_2)
+        except Exception as e:
+            st.error(f"Error connecting to data source: {str(e)}")
+            st.stop()
+    
+        # UI for choosing between AI Generation or Loading a Template
+        c_generate, c_upload = st.columns(2)
+    
+        with c_generate:
+            # Generate Config Button
+            if st.button(f"✨ Auto-Map with {selected_model_display}", type="primary", use_container_width=True):
+                with st.spinner(f'{selected_model_display} is reading your structured data and building a mapping schema...'):
+                    try:
+                        sample1 = conn1.get_sample_data(5).to_csv(index=False)
+                        sample2 = conn2.get_sample_data(5).to_csv(index=False)
+                    
+                        agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
+                        st.session_state.ai_config = agent.suggest_configuration(sample1, sample2)
+                        st.success("AI Analysis Complete!")
+                    except Exception as e:
+                        st.error(f"Error during AI analysis: {str(e)}")
+                    
+        with c_upload:
+            template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"tpl_{st.session_state.uploader_key}", label_visibility="collapsed")
+            if template_file:
                 try:
-                    sample1 = conn1.get_sample_data(5).to_csv(index=False)
-                    sample2 = conn2.get_sample_data(5).to_csv(index=False)
-                    
-                    agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
-                    st.session_state.ai_config = agent.suggest_configuration(sample1, sample2)
-                    st.success("AI Analysis Complete!")
-                except Exception as e:
-                    st.error(f"Error during AI analysis: {str(e)}")
-                    
-    with c_upload:
-        template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"tpl_{st.session_state.uploader_key}", label_visibility="collapsed")
-        if template_file:
-            try:
-                tpl_df = pd.read_csv(template_file)
-                # Ensure the CSV has the expected columns
-                if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
-                    new_mappings = []
-                    for _, row in tpl_df.iterrows():
-                        c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
-                        c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
-                        rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
-                        if rule.lower() == 'nan': rule = ""
+                    tpl_df = pd.read_csv(template_file)
+                    # Ensure the CSV has the expected columns
+                    if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
+                        new_mappings = []
+                        for _, row in tpl_df.iterrows():
+                            c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
+                            c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
+                            rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
+                            if rule.lower() == 'nan': rule = ""
                         
-                        if c1 and c2:
-                            new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
+                            if c1 and c2:
+                                new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
                     
-                    # Store it directly into session state bypassing the AI
-                    st.session_state.ai_config = ValidationConfig(
-                        primary_keys=[], # Primary keys will be manually selected by user next
+                        # Store it directly into session state bypassing the AI
+                        st.session_state.ai_config = ValidationConfig(
+                            primary_keys=[], # Primary keys will be manually selected by user next
+                            column_mappings=new_mappings,
+                            ignore_columns=[]
+                        )
+                        st.success("Template Loaded Successfully!")
+                    else:
+                        st.error("Invalid template format. Must contain 'File 1 Column', 'File 2 Column', and 'Validation Rule (Optional)'.")
+                except Exception as e:
+                    st.error(f"Failed to load template: {str(e)}")
+                
+        # If we have a configuration (either just generated, or from previous click)
+        if st.session_state.ai_config:
+            config = st.session_state.ai_config
+        
+            # UI for editing mappings
+            st.write("Review and adjust the AI's suggestions before running the final comparison:")
+        
+            # Primary Keys UI
+            st.markdown("**Primary Keys** (The unique identifier to link rows together)")
+            pk_cols = st.multiselect("Select Primary Keys (File 1 Columns)", 
+                                     options=conn1.get_sample_data(1).columns.tolist(),
+                                     default=config.primary_keys)
+        
+            # Column Mappings UI as an editable dataframe with DROPDOWNS
+            st.markdown("**Column Mappings** (Leave blank or delete a row to ignore a column)")
+        
+            # Get the actual column names from the uploaded files, plus a blank option
+            file1_cols = [""] + conn1.get_sample_data(1).columns.tolist()
+            file2_cols = [""] + conn2.get_sample_data(1).columns.tolist()
+        
+            mapping_data = [{"File 1 Column": m.file1_column, "File 2 Column": m.file2_column, "Validation Rule (Optional)": m.validation_rule or ""} for m in config.column_mappings]
+            mapping_df = pd.DataFrame(mapping_data)
+
+            # Configure the dataframe to use dropdowns
+            edited_mapping_df = st.data_editor(
+                mapping_df, 
+                num_rows="dynamic", 
+                use_container_width=True,
+                column_config={
+                    "File 1 Column": st.column_config.SelectboxColumn(
+                        "Source Column (File 1)",
+                        options=file1_cols,
+                        required=False
+                    ),
+                    "File 2 Column": st.column_config.SelectboxColumn(
+                        "Target Column (File 2)",
+                        options=file2_cols,
+                        required=False
+                    ),
+                    "Validation Rule (Optional)": st.column_config.TextColumn(
+                        "Validation Rule (Optional)",
+                        help="e.g., 'Must be within $5' or 'Ignore case'",
+                        default=""
+                    )
+                }
+            )
+        
+            # Export Template Button
+            st.download_button(
+                label="💾 Save As Mapping Template (CSV)",
+                data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
+                file_name="truealign_mapping_template.csv",
+                mime="text/csv",
+                help="Download these mappings and rules to instantly load them next time"
+            )
+        
+            st.markdown("---")
+            # --- Step 3: Run Comparison ---
+            if st.button("🚀 Run Full Data Comparison", type="primary", use_container_width=True):
+                with st.spinner('Comparing all rows...'):
+                    # Rebuild config object from the UI edited state, safely dropping empty/deleted rows
+                    new_mappings = []
+                    rules_dict = {}
+                    for index, row in edited_mapping_df.iterrows():
+                        c1_raw = row.get('File 1 Column')
+                        c2_raw = row.get('File 2 Column')
+                        rule_raw = row.get('Validation Rule (Optional)')
+                    
+                        c1 = str(c1_raw).strip() if pd.notna(c1_raw) and c1_raw is not None else ""
+                        c2 = str(c2_raw).strip() if pd.notna(c2_raw) and c2_raw is not None else ""
+                        rule = str(rule_raw).strip() if pd.notna(rule_raw) and rule_raw is not None else ""
+                    
+                        if rule.lower() == 'nan': rule = ""
+                    
+                        # Only map if both columns are provided and not NaN
+                        if c1 and c2 and c1.lower() != 'nan' and c2.lower() != 'nan' and c1 != 'None' and c2 != 'None':
+                            new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
+                            if rule:
+                                rules_dict[c1] = rule
+                
+                    final_config = ValidationConfig(
+                        primary_keys=pk_cols,
                         column_mappings=new_mappings,
                         ignore_columns=[]
                     )
-                    st.success("Template Loaded Successfully!")
-                else:
-                    st.error("Invalid template format. Must contain 'File 1 Column', 'File 2 Column', and 'Validation Rule (Optional)'.")
-            except Exception as e:
-                st.error(f"Failed to load template: {str(e)}")
                 
-    # If we have a configuration (either just generated, or from previous click)
-    if st.session_state.ai_config:
-        config = st.session_state.ai_config
-        
-        # UI for editing mappings
-        st.write("Review and adjust the AI's suggestions before running the final comparison:")
-        
-        # Primary Keys UI
-        st.markdown("**Primary Keys** (The unique identifier to link rows together)")
-        pk_cols = st.multiselect("Select Primary Keys (File 1 Columns)", 
-                                 options=conn1.get_sample_data(1).columns.tolist(),
-                                 default=config.primary_keys)
-        
-        # Column Mappings UI as an editable dataframe with DROPDOWNS
-        st.markdown("**Column Mappings** (Leave blank or delete a row to ignore a column)")
-        
-        # Get the actual column names from the uploaded files, plus a blank option
-        file1_cols = [""] + conn1.get_sample_data(1).columns.tolist()
-        file2_cols = [""] + conn2.get_sample_data(1).columns.tolist()
-        
-        mapping_data = [{"File 1 Column": m.file1_column, "File 2 Column": m.file2_column, "Validation Rule (Optional)": m.validation_rule or ""} for m in config.column_mappings]
-        mapping_df = pd.DataFrame(mapping_data)
+                    # Execute AI Logic if rules exist
+                    rule_code = None
+                    if rules_dict:
+                        st.toast(f"Generating custom validation rules with {selected_model_display}...", icon='🧠')
+                        agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
+                        rule_code = agent.generate_rule_evaluator_code(rules_dict)
+                
+                    # Execute Core Logic
+                    comparator = DataComparator(final_config, rule_code=rule_code)
+                    st.session_state.df1_full = conn1.read_data()
+                    st.session_state.df2_full = conn2.read_data()
+                    st.session_state.results = comparator.compare(st.session_state.df1_full, st.session_state.df2_full)
+                
+                    st.toast('Comparison Complete!', icon='🎉')
+                
+            # --- Step 4: Display Results & Downloads ---
+            if st.session_state.get('results'):
+                results = st.session_state.results
+                df1_full = st.session_state.df1_full
+                df2_full = st.session_state.df2_full
+            
+                st.subheader("📊 Validation Results")
+            
+                # Feature: High Level Metric Summary
+                st.markdown("### Record Counts & Summary")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("File 1 Total Rows", f"{len(df1_full):,}")
+                m2.metric("File 2 Total Rows", f"{len(df2_full):,}")
+            
+                # Optional: Grand Totals for matching numeric columns
+                total_diff = len(df1_full) - len(df2_full)
+                m3.metric("Row Count Difference", f"{total_diff:,}", delta=total_diff, delta_color="inverse")
+            
+                st.markdown("---")
+            
+                st.markdown("### Detailed Exceptions")
+            
+                def get_flattened_mismatches_df(mismatches_list):
+                    flat_data = []
+                    for item in mismatches_list:
+                        pk_str = str(item["primary_keys"])
+                        for diff in item["differences"]:
+                            flat_data.append({
+                                "Primary Key": pk_str,
+                                "Column": diff["column"],
+                                "File 1 Value": diff["file1_value"],
+                                "File 2 Value": diff["file2_value"],
+                                "Validation Rule": diff.get("validation_rule", ""),
+                                "Remarks": diff.get("error", "Exact match failed")
+                            })
+                    return pd.DataFrame(flat_data)
 
-        # Configure the dataframe to use dropdowns
-        edited_mapping_df = st.data_editor(
-            mapping_df, 
-            num_rows="dynamic", 
-            use_container_width=True,
-            column_config={
-                "File 1 Column": st.column_config.SelectboxColumn(
-                    "Source Column (File 1)",
-                    options=file1_cols,
-                    required=False
-                ),
-                "File 2 Column": st.column_config.SelectboxColumn(
-                    "Target Column (File 2)",
-                    options=file2_cols,
-                    required=False
-                ),
-                "Validation Rule (Optional)": st.column_config.TextColumn(
-                    "Validation Rule (Optional)",
-                    help="e.g., 'Must be within $5' or 'Ignore case'",
-                    default=""
-                )
-            }
-        )
-        
-        # Export Template Button
-        st.download_button(
-            label="💾 Save As Mapping Template (CSV)",
-            data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
-            file_name="truealign_mapping_template.csv",
-            mime="text/csv",
-            help="Download these mappings and rules to instantly load them next time"
-        )
-        
-        st.markdown("---")
-        # --- Step 3: Run Comparison ---
-        if st.button("🚀 Run Full Data Comparison", type="primary", use_container_width=True):
-            with st.spinner('Comparing all rows...'):
-                # Rebuild config object from the UI edited state, safely dropping empty/deleted rows
-                new_mappings = []
-                rules_dict = {}
-                for index, row in edited_mapping_df.iterrows():
-                    c1_raw = row.get('File 1 Column')
-                    c2_raw = row.get('File 2 Column')
-                    rule_raw = row.get('Validation Rule (Optional)')
-                    
-                    c1 = str(c1_raw).strip() if pd.notna(c1_raw) and c1_raw is not None else ""
-                    c2 = str(c2_raw).strip() if pd.notna(c2_raw) and c2_raw is not None else ""
-                    rule = str(rule_raw).strip() if pd.notna(rule_raw) and rule_raw is not None else ""
-                    
-                    if rule.lower() == 'nan': rule = ""
-                    
-                    # Only map if both columns are provided and not NaN
-                    if c1 and c2 and c1.lower() != 'nan' and c2.lower() != 'nan' and c1 != 'None' and c2 != 'None':
-                        new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
-                        if rule:
-                            rules_dict[c1] = rule
+                # We need a helper to generate CSV strings for download
+                def to_csv_download(data_dict_list, is_mismatch=False):
+                    if not data_dict_list: return None
                 
-                final_config = ValidationConfig(
-                    primary_keys=pk_cols,
-                    column_mappings=new_mappings,
-                    ignore_columns=[]
-                )
-                
-                # Execute AI Logic if rules exist
-                rule_code = None
-                if rules_dict:
-                    st.toast(f"Generating custom validation rules with {selected_model_display}...", icon='🧠')
-                    agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
-                    rule_code = agent.generate_rule_evaluator_code(rules_dict)
-                
-                # Execute Core Logic
-                comparator = DataComparator(final_config, rule_code=rule_code)
-                st.session_state.df1_full = conn1.read_data()
-                st.session_state.df2_full = conn2.read_data()
-                st.session_state.results = comparator.compare(st.session_state.df1_full, st.session_state.df2_full)
-                
-                st.toast('Comparison Complete!', icon='🎉')
-                
-        # --- Step 4: Display Results & Downloads ---
-        if st.session_state.get('results'):
-            results = st.session_state.results
-            df1_full = st.session_state.df1_full
-            df2_full = st.session_state.df2_full
-            
-            st.subheader("📊 Validation Results")
-            
-            # Feature: High Level Metric Summary
-            st.markdown("### Record Counts & Summary")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("File 1 Total Rows", f"{len(df1_full):,}")
-            m2.metric("File 2 Total Rows", f"{len(df2_full):,}")
-            
-            # Optional: Grand Totals for matching numeric columns
-            total_diff = len(df1_full) - len(df2_full)
-            m3.metric("Row Count Difference", f"{total_diff:,}", delta=total_diff, delta_color="inverse")
-            
-            st.markdown("---")
-            
-            st.markdown("### Detailed Exceptions")
-            
-            def get_flattened_mismatches_df(mismatches_list):
-                flat_data = []
-                for item in mismatches_list:
-                    pk_str = str(item["primary_keys"])
-                    for diff in item["differences"]:
-                        flat_data.append({
-                            "Primary Key": pk_str,
-                            "Column": diff["column"],
-                            "File 1 Value": diff["file1_value"],
-                            "File 2 Value": diff["file2_value"],
-                            "Validation Rule": diff.get("validation_rule", ""),
-                            "Remarks": diff.get("error", "Exact match failed")
-                        })
-                return pd.DataFrame(flat_data)
+                    if is_mismatch:
+                         return get_flattened_mismatches_df(data_dict_list).to_csv(index=False).encode('utf-8')
+                    else:
+                         return pd.DataFrame(data_dict_list).to_csv(index=False).encode('utf-8')
 
-            # We need a helper to generate CSV strings for download
-            def to_csv_download(data_dict_list, is_mismatch=False):
-                if not data_dict_list: return None
-                
-                if is_mismatch:
-                     return get_flattened_mismatches_df(data_dict_list).to_csv(index=False).encode('utf-8')
-                else:
-                     return pd.DataFrame(data_dict_list).to_csv(index=False).encode('utf-8')
-
-            # Create tabs for clean viewing
-            tab1, tab2, tab3 = st.tabs(["Mismatched Values", "Missing in Source", "Missing in External"])
+                # Create tabs for clean viewing
+                tab1, tab2, tab3 = st.tabs(["Mismatched Values", "Missing in Source", "Missing in External"])
             
-            with tab1:
-                mismatches = results.get('mismatches', [])
-                st.metric("Total Mismatched Rows", len(mismatches))
-                if mismatches:
-                    flat_df = get_flattened_mismatches_df(mismatches)
-                    csv_data = flat_df.to_csv(index=False).encode('utf-8')
-                    st.download_button("Download Mismatches CSV", data=csv_data, file_name="mismatches.csv", mime="text/csv")
-                    st.dataframe(flat_df.astype(str)) # Easy viewer
+                with tab1:
+                    mismatches = results.get('mismatches', [])
+                    st.metric("Total Mismatched Rows", len(mismatches))
+                    if mismatches:
+                        flat_df = get_flattened_mismatches_df(mismatches)
+                        csv_data = flat_df.to_csv(index=False).encode('utf-8')
+                        st.download_button("Download Mismatches CSV", data=csv_data, file_name="mismatches.csv", mime="text/csv")
+                        st.dataframe(flat_df.astype(str)) # Easy viewer
             
-            with tab2:
-                 missing_f1 = results.get('missing_in_file1', [])
-                 st.metric("Total Rows Missing in Source File", len(missing_f1))
-                 if missing_f1:
-                     csv_data = to_csv_download(missing_f1)
-                     st.download_button("Download Missing (Source) CSV", data=csv_data, file_name="missing_source.csv", mime="text/csv")
-                     st.dataframe(pd.DataFrame(missing_f1))
+                with tab2:
+                     missing_f1 = results.get('missing_in_file1', [])
+                     st.metric("Total Rows Missing in Source File", len(missing_f1))
+                     if missing_f1:
+                         csv_data = to_csv_download(missing_f1)
+                         st.download_button("Download Missing (Source) CSV", data=csv_data, file_name="missing_source.csv", mime="text/csv")
+                         st.dataframe(pd.DataFrame(missing_f1))
                      
-            with tab3:
-                 missing_f2 = results.get('missing_in_file2', [])
-                 st.metric("Total Rows Missing in External File", len(missing_f2))
-                 if missing_f2:
-                     csv_data = to_csv_download(missing_f2)
-                     st.download_button("Download Missing (External) CSV", data=csv_data, file_name="missing_external.csv", mime="text/csv")
-                     st.dataframe(pd.DataFrame(missing_f2))
+                with tab3:
+                     missing_f2 = results.get('missing_in_file2', [])
+                     st.metric("Total Rows Missing in External File", len(missing_f2))
+                     if missing_f2:
+                         csv_data = to_csv_download(missing_f2)
+                         st.download_button("Download Missing (External) CSV", data=csv_data, file_name="missing_external.csv", mime="text/csv")
+                         st.dataframe(pd.DataFrame(missing_f2))
             
-            st.markdown("---")
-            if st.button("🔄 Start New Data Validation", type="secondary", use_container_width=True):
-                reset_app()
+                st.markdown("---")
+                if st.button("🔄 Start New Data Validation", type="secondary", use_container_width=True):
+                    reset_app()
