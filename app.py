@@ -206,9 +206,10 @@ if st.session_state.get('execution_tier') is None:
             pass
             
     with c3:
-        st.error("**🌐 DB Pushdown Engine** (In Development)\n\nFor enterprise SQL data warehouses.\n\n- Zero data downloading required\n- Translates AI rules to native SQL\n- Infinite database scale (Snowflake)")
-        if st.button("Launch Pushdown Engine", disabled=True, use_container_width=True, help="Coming soon from your AI developer"):
-            pass
+        st.error("**🌐 DB Pushdown Engine**\n\nFor enterprise SQL data warehouses.\n\n- Zero data downloading required\n- Translates AI rules to native SQL\n- Infinite database scale")
+        if st.button("Launch Pushdown Engine", use_container_width=True):
+            st.session_state.execution_tier = "pushdown"
+            st.rerun()
             
     st.stop()
 
@@ -667,4 +668,210 @@ elif st.session_state.execution_tier == "heavy":
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("🔄 Start New Validation (Bottom)", use_container_width=True, key="h_reset"):
+                    reset_app()
+
+elif st.session_state.execution_tier == "pushdown":
+    st.markdown(f"**🟢 Active Engine:** Live DB Pushdown Engine (Zero Download)")
+    
+    st.subheader("🏢 Enterprise Database Connection")
+    st.markdown("Enter your database credentials to execute validation natively.")
+    
+    # We use a single connection for the Pushdown engine so records can be joined natively
+    db_type_pd = st.selectbox("SQL Dialect", ["Snowflake", "Microsoft SQL Server", "Oracle", "PostgreSQL", "SQLite (Local)"], key="pd_db_type")
+    
+    conn_str_pd = ""
+    if db_type_pd == "SQLite (Local)":
+        db_path = st.text_input("Database File Path", placeholder="local_production.db", key="pd_sqlite")
+        if db_path: conn_str_pd = f"sqlite:///{db_path}"
+    else:
+        c1, c2 = st.columns([3, 1])
+        host = c1.text_input("Server Host", key="pd_host")
+        port = c2.text_input("Port", value={"Snowflake": "443", "Microsoft SQL Server": "1433", "Oracle": "1521", "PostgreSQL": "5432"}[db_type_pd], key="pd_port")
+        db_name = st.text_input("Database Name", key="pd_db")
+        c3, c4 = st.columns(2)
+        user = c3.text_input("Username", key="pd_user")
+        password = c4.text_input("Password", type="password", key="pd_pass")
+        
+        if host and db_name and user and password:
+            if db_type_pd == "Snowflake": conn_str_pd = f"snowflake://{user}:{password}@{host}/{db_name}"
+            elif db_type_pd == "Microsoft SQL Server": conn_str_pd = f"mssql+pyodbc://{user}:{password}@{host}:{port}/{db_name}?driver=ODBC+Driver+17+for+SQL+Server"
+            elif db_type_pd == "Oracle": conn_str_pd = f"oracle+oracledb://{user}:{password}@{host}:{port}/?service_name={db_name}"
+            elif db_type_pd == "PostgreSQL": conn_str_pd = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+
+    st.markdown("---")
+    c_q1, c_q2 = st.columns(2)
+    with c_q1:
+        st.subheader("📁 System of Record")
+        q1 = st.text_area("SQL Query 1", placeholder="SELECT * FROM main_finance_table", key="pd_q1")
+    with c_q2:
+        st.subheader("📄 External Data")
+        q2 = st.text_area("SQL Query 2", placeholder="SELECT * FROM external_vendor_table", key="pd_q2")
+
+    if conn_str_pd and q1 and q2:
+        st.markdown("---")
+        st.subheader("🧠 Step 2: Select AI Model & Map Schema")
+        
+        if not st.session_state.user_configured_models:
+            st.warning("⚠️ No AI Models configured. Please click the ⚙️ Settings menu (top right) to add a model and API key.")
+            st.stop()
+            
+        c_model, _ = st.columns([1, 2])
+        with c_model:
+            selected_model_display = st.selectbox("Active AI Model", st.session_state.user_configured_models, key="pd_model")
+            litellm_model_str, required_env_key = AVAILABLE_MODELS[selected_model_display]
+            active_api_key = st.session_state.stored_keys.get(required_env_key, "")
+
+        if not active_api_key:
+             st.warning(f"⚠️ You must configure your `{required_env_key}` in the ⚙️ Settings menu (top right) to use {selected_model_display}.")
+             st.stop()
+             
+        # UI for choosing AI Mapping Generation vs Uploading a Template
+        c_generate, c_upload = st.columns(2)
+        
+        with c_generate:
+            if st.button(f"✨ Auto-Map Queries with {selected_model_display}", type="primary", use_container_width=True, key="pd_analyze"):
+                with st.spinner(f'Extracting headers from the database and building a mapping schema...'):
+                    try:
+                        from sqlalchemy import create_engine, text
+                        tmp_engine = create_engine(conn_str_pd)
+                        with tmp_engine.connect() as conn:
+                            s1_sample = pd.read_sql(text(q1 + " LIMIT 5" if "LIMIT" not in q1.upper() else q1), conn)
+                            s2_sample = pd.read_sql(text(q2 + " LIMIT 5" if "LIMIT" not in q2.upper() else q2), conn)
+                            
+                        agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
+                        st.session_state.ai_config = agent.suggest_configuration(s1_sample.to_csv(index=False), s2_sample.to_csv(index=False))
+                        st.session_state.pd_data = (conn_str_pd, q1, q2)
+                        st.success("AI Schema Analysis Complete!")
+                    except Exception as e:
+                        st.error(f"Database Query Failed: {str(e)}")
+                        
+        with c_upload:
+            template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"pdtpl_{st.session_state.uploader_key}", label_visibility="collapsed")
+            if template_file:
+                try:
+                    tpl_df = pd.read_csv(template_file)
+                    if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
+                        new_mappings = []
+                        for _, row in tpl_df.iterrows():
+                            c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
+                            c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
+                            rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
+                            if rule.lower() == 'nan': rule = ""
+                            if c1 and c2:
+                                new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
+                        
+                        st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=new_mappings, ignore_columns=[])
+                        st.session_state.pd_data = (conn_str_pd, q1, q2)
+                        st.success("Template Loaded Successfully!")
+                except Exception as e:
+                    st.error(f"Failed to load template: {str(e)}")
+
+        # --- PUSHDOWN GRID CONFIGURATOR ---
+        if st.session_state.ai_config and st.session_state.get('pd_data'):
+            config = st.session_state.ai_config
+            _, pd_q1, pd_q2 = st.session_state.pd_data
+            
+            # Re-fetch headers to populate mapping dropdowns
+            try:
+                from sqlalchemy import create_engine, text
+                tmp_engine = create_engine(conn_str_pd)
+                with tmp_engine.connect() as conn:
+                    header1 = pd.read_sql(text(pd_q1 + " LIMIT 1" if "LIMIT" not in pd_q1.upper() else pd_q1), conn).columns.tolist()
+                    header2 = pd.read_sql(text(pd_q2 + " LIMIT 1" if "LIMIT" not in pd_q2.upper() else pd_q2), conn).columns.tolist()
+            except Exception:
+                header1, header2 = [], []
+                
+            f1_cols = [""] + header1
+            f2_cols = [""] + header2
+            
+            st.write("Review your AI mapping before pushing the execution engine into the remote database:")
+            
+            st.markdown("**Primary Keys**")
+            pk_cols = st.multiselect("Select Primary Keys (Query 1 Columns)", options=[x for x in f1_cols if x], default=config.primary_keys, key="pd_pk")
+            
+            st.markdown("**Column Mappings**")
+            mapping_data = [{"File 1 Column": m.file1_column, "File 2 Column": m.file2_column, "Validation Rule (Optional)": m.validation_rule or ""} for m in config.column_mappings]
+            mapping_df = pd.DataFrame(mapping_data)
+
+            edited_mapping_df = st.data_editor(
+                mapping_df, num_rows="dynamic", use_container_width=True, key="pd_editor",
+                column_config={
+                    "File 1 Column": st.column_config.SelectboxColumn("Source Column", options=f1_cols),
+                    "File 2 Column": st.column_config.SelectboxColumn("Target Column", options=f2_cols),
+                    "Validation Rule (Optional)": st.column_config.TextColumn("Validation Rule")
+                }
+            )
+            
+            st.download_button(
+                label="💾 Save As Mapping Template (CSV)",
+                data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
+                file_name="truealign_db_mapping_template.csv",
+                mime="text/csv",
+                key="pd_download_tpl"
+            )
+            
+            st.markdown("---")
+            if st.button("🚀 Push Validation Execution to Database", type="primary", use_container_width=True, key="pd_run"):
+                if not pk_cols:
+                    st.error("You must select at least one Primary Key before executing.")
+                    st.stop()
+                    
+                with st.spinner('Translating AI rules into SQL and pushing the execution query down to the remote database...'):
+                    new_mappings = []
+                    rules_dict = {}
+                    for index, row in edited_mapping_df.iterrows():
+                        c1, c2, rule = str(row.get('File 1 Column')), str(row.get('File 2 Column')), str(row.get('Validation Rule (Optional)'))
+                        if c1 and c2 and c1 != 'None' and c2 != 'None' and c1 != 'nan':
+                            new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule != 'nan' else None))
+                            if rule and rule != 'nan':
+                                rules_dict[c1] = rule
+                    
+                    final_config = ValidationConfig(primary_keys=pk_cols, column_mappings=new_mappings)
+                    
+                    from core.engines.sql_pushdown import SQLPushdownEngine
+                    pushdown_engine = SQLPushdownEngine(final_config, rules_dict=rules_dict)
+                    
+                    try:
+                        st.session_state.results = pushdown_engine.compare(conn_str_pd, pd_q1, pd_q2)
+                        st.toast('Pushdown Execution Complete!', icon='🚀')
+                    except Exception as e:
+                        st.error(f"Remote Execution Failed: {str(e)}")
+                        
+            # Results UI
+            if 'results' in st.session_state:
+                res = st.session_state.results
+                total1, total2 = res.get('Total Rows File 1', 0), res.get('Total Rows File 2', 0)
+                mismatches = len(res.get('Data Mismatches', []))
+                
+                st.subheader("📊 Remote Database Execution Results")
+                k1, k2, k3, k4, k5 = st.columns(5)
+                k1.metric("Rows Scanned (Query 1)", f"{total1:,}")
+                k2.metric("Rows Scanned (Query 2)", f"{total2:,}")
+                k3.metric("Exact Matches", f"{len(res.get('Exact Matches', [])):,}")
+                k4.metric("Missing Rows", f"{(len(res.get('Missing in File 1 (Found in 2)', [])) + len(res.get('Missing in File 2 (Found in 1)', []))):,}")
+                k5.metric("Data Mismatches", f"{mismatches:,}")
+                
+                t1, t2, t3, t4 = st.tabs(["📝 Mismatch Report", "❌ Missing in 1", "❌ Missing in 2", "✅ Exact Matches"])
+                with t1:
+                    if mismatches > 0: st.dataframe(pd.DataFrame(res.get('Mismatch Breakdown', [])), use_container_width=True)
+                    else: st.success("No validation errors found!")
+                with t2: st.dataframe(res.get('Missing in File 1 (Found in 2)', pd.DataFrame()), use_container_width=True)
+                with t3: st.dataframe(res.get('Missing in File 2 (Found in 1)', pd.DataFrame()), use_container_width=True)
+                with t4: st.dataframe(res.get('Exact Matches', pd.DataFrame()), use_container_width=True)
+                
+                from core.reporter import ExcelReporter
+                reporter = ExcelReporter()
+                excel_bytes = reporter.generate_excel_report(res)
+                st.download_button(
+                    label="📥 Download Exceptions Report (Excel)",
+                    data=excel_bytes,
+                    file_name="TrueAlign_DB_Audit.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    use_container_width=True,
+                    key="pd_excel"
+                )
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🔄 Start New Validation (Bottom)", use_container_width=True, key="pd_reset"):
                     reset_app()
