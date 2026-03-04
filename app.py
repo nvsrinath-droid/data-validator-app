@@ -49,34 +49,40 @@ AVAILABLE_MODELS = {
     "Mistral Large": ("mistral/mistral-large-latest", "MISTRAL_API_KEY")
 }
 
-# --- Sidebar Configuration ---
-with st.sidebar:
-    st.markdown("<div style='font-size: 50px;'>🎯</div>", unsafe_allow_html=True)
-    st.title("AI Settings")
-    
-    # Model Selection
-    selected_model_display = st.selectbox("Select AI Model", list(AVAILABLE_MODELS.keys()))
-    litellm_model_str, required_env_key = AVAILABLE_MODELS[selected_model_display]
-    
-    # Key Storage
-    api_key_input = st.text_input(f"Enter {required_env_key}", type="password", help=f"Required for {selected_model_display}")
-    
-    # The active key for the *selected* model
-    active_api_key = api_key_input if api_key_input else os.environ.get(required_env_key)
+# Initialize Session State for API Keys if they don't exist
+if 'stored_keys' not in st.session_state:
+    st.session_state.stored_keys = {
+        "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY", ""),
+        "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
+        "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""),
+        "GROQ_API_KEY": os.environ.get("GROQ_API_KEY", ""),
+        "COHERE_API_KEY": os.environ.get("COHERE_API_KEY", ""),
+        "MISTRAL_API_KEY": os.environ.get("MISTRAL_API_KEY", "")
+    }
 
-    if not active_api_key:
-        st.warning(f"Please provide your {required_env_key} to use {selected_model_display}")
-    else:
-        st.success(f"{selected_model_display} Ready!")
+@st.dialog("⚙️ Global AI Settings & API Keys")
+def settings_modal():
+    st.markdown("Store your API keys here. They are saved securely in your active session.")
+    
+    # Create input fields for each major provider
+    for key_name in st.session_state.stored_keys.keys():
+        provider_name = key_name.split('_')[0].title()
         
-    st.markdown("---")
-    st.markdown("""
-    **How to use:**
-    1. Select your **Data Sources** (File Uploads or Live SQL Databases).
-    2. Review the AI's **Schema Mappings**.
-    3. Add optional **Plain-English Rules** (e.g., 'Must be within 2%').
-    4. Run the validation report!
-    """)
+        # Inject current value if it exists
+        current_val = st.session_state.stored_keys[key_name]
+        
+        new_val = st.text_input(
+            f"{provider_name} API Key", 
+            value=current_val, 
+            type="password", 
+            key=f"input_{key_name}"
+        )
+        
+        if new_val != current_val:
+            st.session_state.stored_keys[key_name] = new_val
+            
+    if st.button("Save & Close", type="primary", use_container_width=True):
+        st.rerun()
 
 # State management for full app reset
 if 'uploader_key' not in st.session_state:
@@ -96,13 +102,17 @@ if 'ai_config' not in st.session_state:
     st.session_state.ai_config = None
 
 # Top level reset button
-colA, colB = st.columns([3, 1])
+colA, colB, colC = st.columns([5, 1, 1])
 with colA:
     st.title("🎯 TrueAlign Data")
     st.markdown("Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of AI.")
 with colB:
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🔄 Start New Validation", use_container_width=True):
+    if st.button("⚙️ Settings", use_container_width=True):
+        settings_modal()
+with colC:
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🔄 Reset", use_container_width=True, help="Start a new validation"):
         reset_app()
 
 def render_sql_form(key_prefix):
@@ -164,8 +174,18 @@ with col2:
         source_2 = render_sql_form(f"src2_{st.session_state.uploader_key}")
 
 if source_1 and source_2:
+    st.markdown("---")
+    st.subheader("🧠 Step 2: Select AI Model & Map Schema")
+    
+    # Pull model selection out of the sidebar and into the main flow
+    c_model, _ = st.columns([1, 2])
+    with c_model:
+        selected_model_display = st.selectbox("Active AI Model", list(AVAILABLE_MODELS.keys()))
+        litellm_model_str, required_env_key = AVAILABLE_MODELS[selected_model_display]
+        active_api_key = st.session_state.stored_keys.get(required_env_key, "")
+
     if not active_api_key:
-         st.warning("Please configure an AI Model in the sidebar to continue.")
+         st.warning(f"⚠️ You must configure your `{required_env_key}` in the ⚙️ Settings menu (top right) to use {selected_model_display}.")
          st.stop()
          
     # Init connectors dynamically based on the user's choice
@@ -181,9 +201,6 @@ if source_1 and source_2:
     except Exception as e:
         st.error(f"Error connecting to data source: {str(e)}")
         st.stop()
-    
-    st.markdown("---")
-    st.subheader("🧠 Step 2: AI Schema Mapping")
     
     # Generate Config Button
     if st.button(f"✨ Analyze Files with {selected_model_display}", type="primary"):
