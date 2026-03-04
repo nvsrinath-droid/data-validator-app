@@ -128,7 +128,7 @@ if file1 and file2:
         file1_cols = [""] + conn1.get_sample_data(1).columns.tolist()
         file2_cols = [""] + conn2.get_sample_data(1).columns.tolist()
         
-        mapping_data = [{"File 1 Column": m.file1_column, "File 2 Column": m.file2_column, "Remove Mapping 🗑️": False} for m in config.column_mappings]
+        mapping_data = [{"File 1 Column": m.file1_column, "File 2 Column": m.file2_column} for m in config.column_mappings]
         mapping_df = pd.DataFrame(mapping_data)
 
         # Configure the dataframe to use dropdowns
@@ -146,11 +146,6 @@ if file1 and file2:
                     "Target Column (File 2)",
                     options=file2_cols,
                     required=False
-                ),
-                "Remove Mapping 🗑️": st.column_config.CheckboxColumn(
-                    "Remove Mapping 🗑️",
-                    default=False,
-                    help="Check this box to ignore this row entirely"
                 )
             }
         )
@@ -161,10 +156,6 @@ if file1 and file2:
                 # Rebuild config object from the UI edited state, safely dropping empty/deleted rows
                 new_mappings = []
                 for index, row in edited_mapping_df.iterrows():
-                    # Skip rows the user marked for deletion
-                    if row.get('Remove Mapping 🗑️', False):
-                        continue
-                    
                     c1 = str(row.get('File 1 Column', '')).strip()
                     c2 = str(row.get('File 2 Column', '')).strip()
                     # Only map if both columns are provided and not NaN
