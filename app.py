@@ -238,18 +238,51 @@ if source_1 and source_2:
         st.error(f"Error connecting to data source: {str(e)}")
         st.stop()
     
-    # Generate Config Button
-    if st.button(f"✨ Analyze Files with {selected_model_display}", type="primary"):
-        with st.spinner(f'{selected_model_display} is reading your structured data and building a mapping schema...'):
+    # UI for choosing between AI Generation or Loading a Template
+    c_generate, c_upload = st.columns(2)
+    
+    with c_generate:
+        # Generate Config Button
+        if st.button(f"✨ Auto-Map with {selected_model_display}", type="primary", use_container_width=True):
+            with st.spinner(f'{selected_model_display} is reading your structured data and building a mapping schema...'):
+                try:
+                    sample1 = conn1.get_sample_data(5).to_csv(index=False)
+                    sample2 = conn2.get_sample_data(5).to_csv(index=False)
+                    
+                    agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
+                    st.session_state.ai_config = agent.suggest_configuration(sample1, sample2)
+                    st.success("AI Analysis Complete!")
+                except Exception as e:
+                    st.error(f"Error during AI analysis: {str(e)}")
+                    
+    with c_upload:
+        template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"tpl_{st.session_state.uploader_key}", label_visibility="collapsed")
+        if template_file:
             try:
-                sample1 = conn1.get_sample_data(5).to_csv(index=False)
-                sample2 = conn2.get_sample_data(5).to_csv(index=False)
-                
-                agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
-                st.session_state.ai_config = agent.suggest_configuration(sample1, sample2)
-                st.success("Analysis Complete!")
+                tpl_df = pd.read_csv(template_file)
+                # Ensure the CSV has the expected columns
+                if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
+                    new_mappings = []
+                    for _, row in tpl_df.iterrows():
+                        c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
+                        c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
+                        rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
+                        if rule.lower() == 'nan': rule = ""
+                        
+                        if c1 and c2:
+                            new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
+                    
+                    # Store it directly into session state bypassing the AI
+                    st.session_state.ai_config = ValidationConfig(
+                        primary_keys=[], # Primary keys will be manually selected by user next
+                        column_mappings=new_mappings,
+                        ignore_columns=[]
+                    )
+                    st.success("Template Loaded Successfully!")
+                else:
+                    st.error("Invalid template format. Must contain 'File 1 Column', 'File 2 Column', and 'Validation Rule (Optional)'.")
             except Exception as e:
-                st.error(f"Error during AI analysis: {str(e)}")
+                st.error(f"Failed to load template: {str(e)}")
                 
     # If we have a configuration (either just generated, or from previous click)
     if st.session_state.ai_config:
@@ -297,6 +330,17 @@ if source_1 and source_2:
                 )
             }
         )
+        )
+        
+        # Export Template Button
+        st.download_button(
+            label="💾 Save As Mapping Template (CSV)",
+            data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
+            file_name="truealign_mapping_template.csv",
+            mime="text/csv",
+            help="Download these mappings and rules to instantly load them next time"
+        )
+        
         st.markdown("---")
         # --- Step 3: Run Comparison ---
         if st.button("🚀 Run Full Data Comparison", type="primary", use_container_width=True):
