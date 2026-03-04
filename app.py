@@ -22,6 +22,7 @@ st.markdown("""
 
 # Important imports
 from connectors.file_connector import FileConnector
+from connectors.sql_connector import SQLConnector
 from ai.agent import GeminiAgent
 from core.schemas import ValidationConfig, ColumnMap
 from core.comparator import DataComparator
@@ -73,24 +74,46 @@ with colB:
     if st.button("🔄 Start New Validation", use_container_width=True):
         reset_app()
 
-# Step 1: Upload Files
+# Step 1: Data Sources Selection
 col1, col2 = st.columns(2)
 with col1:
-    st.subheader("📁 Source File (System of Record)")
-    file1 = st.file_uploader("Upload File 1", type=["csv", "xlsx"], key=f"file1_{st.session_state.uploader_key}")
+    st.subheader("📁 Source Data (System of Record)")
+    source_type_1 = st.radio("Source 1 Type", ["File Upload", "SQL Database"], horizontal=True, key=f"src1_type_{st.session_state.uploader_key}")
+    if source_type_1 == "File Upload":
+        source_1 = st.file_uploader("Upload File 1", type=["csv", "xlsx"], key=f"file1_{st.session_state.uploader_key}")
+    else:
+        conn_str_1 = st.text_input("Connection String", placeholder="sqlite:///local_production.db", key=f"conn_str_1_{st.session_state.uploader_key}")
+        query_1 = st.text_area("SQL Query", placeholder="SELECT * FROM employees", key=f"query_1_{st.session_state.uploader_key}")
+        source_1 = {"type": "sql", "conn_str": conn_str_1, "query": query_1} if conn_str_1 and query_1 else None
 
 with col2:
-    st.subheader("📄 External File (To Compare)")
-    file2 = st.file_uploader("Upload File 2", type=["csv", "xlsx"], key=f"file2_{st.session_state.uploader_key}")
+    st.subheader("📄 External Data (To Compare)")
+    source_type_2 = st.radio("Source 2 Type", ["File Upload", "SQL Database"], horizontal=True, key=f"src2_type_{st.session_state.uploader_key}")
+    if source_type_2 == "File Upload":
+        source_2 = st.file_uploader("Upload File 2", type=["csv", "xlsx"], key=f"file2_{st.session_state.uploader_key}")
+    else:
+        conn_str_2 = st.text_input("Connection String", placeholder="sqlite:///local_production.db", key=f"conn_str_2_{st.session_state.uploader_key}")
+        query_2 = st.text_area("SQL Query", placeholder="SELECT * FROM employees", key=f"query_2_{st.session_state.uploader_key}")
+        source_2 = {"type": "sql", "conn_str": conn_str_2, "query": query_2} if conn_str_2 and query_2 else None
 
-if file1 and file2:
+if source_1 and source_2:
     if not api_key:
          st.warning("Please provide a Gemini API Key in the sidebar to continue.")
          st.stop()
          
-    # Init connectors
-    conn1 = FileConnector(file1)
-    conn2 = FileConnector(file2)
+    # Init connectors dynamically based on the user's choice
+    def init_connector(source_data):
+        if isinstance(source_data, dict) and source_data.get('type') == 'sql':
+            return SQLConnector(source_data['conn_str'], source_data['query'])
+        else:
+            return FileConnector(source_data)
+            
+    try:
+        conn1 = init_connector(source_1)
+        conn2 = init_connector(source_2)
+    except Exception as e:
+        st.error(f"Error connecting to data source: {str(e)}")
+        st.stop()
     
     st.markdown("---")
     st.subheader("🧠 Step 2: AI Schema Mapping")
