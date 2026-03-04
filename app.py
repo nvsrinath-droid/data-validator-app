@@ -437,7 +437,7 @@ if not st.session_state.user and not st.session_state.is_guest:
     with c_reg:
         st.subheader("Create a Free Account")
         st.info("Registered users can securely save their AI mapping templates for future pipelines.")
-        with st.form("register_form"):
+        with st.form("register_form", clear_on_submit=True):
             email_reg = st.text_input("Email")
             pass_reg = st.text_input("Password", type="password")
             if st.form_submit_button("Register", type="primary", use_container_width=True):
