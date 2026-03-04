@@ -41,11 +41,16 @@ with st.sidebar:
         if api_key_input:
             api_key = api_key_input
             os.environ["GEMINI_API_KEY"] = api_key
-    else:
-        st.success("API Key Loaded!")
+            st.rerun() # Force an immediate refresh
         
     st.markdown("---")
-    st.markdown("**How to use:**\n1. Upload your two files.\n2. Review the AI's mapping guesses.\n3. Run the validation report!")
+    st.markdown("""
+    **How to use:**
+    1. Select your **Data Sources** (File Uploads or Live SQL Databases).
+    2. Review the AI's **Schema Mappings**.
+    3. Add optional **Plain-English Rules** (e.g., 'Must be within 2%').
+    4. Run the validation report!
+    """)
 
 # State management for full app reset
 if 'uploader_key' not in st.session_state:
@@ -68,7 +73,7 @@ if 'ai_config' not in st.session_state:
 colA, colB = st.columns([3, 1])
 with colA:
     st.title("🕵️ Intelligent Data Validator")
-    st.markdown("Easily find missing rows and mismatched values between any two spreadsheets using the power of Google Gemini.")
+    st.markdown("Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of Google Gemini.")
 with colB:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🔄 Start New Validation", use_container_width=True):
