@@ -74,6 +74,46 @@ with colB:
     if st.button("🔄 Start New Validation", use_container_width=True):
         reset_app()
 
+def render_sql_form(key_prefix):
+    db_type = st.selectbox("Database Type", ["Snowflake", "Microsoft SQL Server", "Oracle", "PostgreSQL", "SQLite (Local)"], key=f"db_type_{key_prefix}")
+    
+    conn_str = ""
+    if db_type == "SQLite (Local)":
+        db_path = st.text_input("Database File Path", placeholder="local_production.db", key=f"sqlite_{key_prefix}")
+        if db_path:
+            conn_str = f"sqlite:///{db_path}"
+    else:
+        # Enterprise DB Form
+        c1, c2 = st.columns([3, 1])
+        host = c1.text_input("Host / Server Address", placeholder="e.g., my-account.snowflakecomputing.com", key=f"host_{key_prefix}")
+        
+        # Default ports
+        default_port = {"Snowflake": "443", "Microsoft SQL Server": "1433", "Oracle": "1521", "PostgreSQL": "5432"}[db_type]
+        port = c2.text_input("Port", value=default_port, key=f"port_{key_prefix}")
+        
+        db_name = st.text_input("Database Name", key=f"db_{key_prefix}")
+        
+        c3, c4 = st.columns(2)
+        user = c3.text_input("Username", key=f"user_{key_prefix}")
+        password = c4.text_input("Password", type="password", key=f"pass_{key_prefix}")
+        
+        if host and db_name and user and password:
+            if db_type == "Snowflake":
+                conn_str = f"snowflake://{user}:{password}@{host}/{db_name}"
+            elif db_type == "Microsoft SQL Server":
+                # Assuming pyodbc is installed
+                conn_str = f"mssql+pyodbc://{user}:{password}@{host}:{port}/{db_name}?driver=ODBC+Driver+17+for+SQL+Server"
+            elif db_type == "Oracle":
+                conn_str = f"oracle+oracledb://{user}:{password}@{host}:{port}/?service_name={db_name}"
+            elif db_type == "PostgreSQL":
+                conn_str = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+
+    query = st.text_area("SQL Query", placeholder="SELECT * FROM table_name", key=f"q_{key_prefix}")
+    
+    if conn_str and query:
+        return {"type": "sql", "conn_str": conn_str, "query": query}
+    return None
+
 # Step 1: Data Sources Selection
 col1, col2 = st.columns(2)
 with col1:
@@ -82,9 +122,7 @@ with col1:
     if source_type_1 == "File Upload":
         source_1 = st.file_uploader("Upload File 1", type=["csv", "xlsx"], key=f"file1_{st.session_state.uploader_key}")
     else:
-        conn_str_1 = st.text_input("Connection String", placeholder="sqlite:///local_production.db", key=f"conn_str_1_{st.session_state.uploader_key}")
-        query_1 = st.text_area("SQL Query", placeholder="SELECT * FROM employees", key=f"query_1_{st.session_state.uploader_key}")
-        source_1 = {"type": "sql", "conn_str": conn_str_1, "query": query_1} if conn_str_1 and query_1 else None
+        source_1 = render_sql_form(f"src1_{st.session_state.uploader_key}")
 
 with col2:
     st.subheader("📄 External Data (To Compare)")
@@ -92,9 +130,7 @@ with col2:
     if source_type_2 == "File Upload":
         source_2 = st.file_uploader("Upload File 2", type=["csv", "xlsx"], key=f"file2_{st.session_state.uploader_key}")
     else:
-        conn_str_2 = st.text_input("Connection String", placeholder="sqlite:///local_production.db", key=f"conn_str_2_{st.session_state.uploader_key}")
-        query_2 = st.text_area("SQL Query", placeholder="SELECT * FROM employees", key=f"query_2_{st.session_state.uploader_key}")
-        source_2 = {"type": "sql", "conn_str": conn_str_2, "query": query_2} if conn_str_2 and query_2 else None
+        source_2 = render_sql_form(f"src2_{st.session_state.uploader_key}")
 
 if source_1 and source_2:
     if not api_key:
