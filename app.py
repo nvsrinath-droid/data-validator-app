@@ -140,7 +140,7 @@ def inject_premium_css():
         color: white !important;
     }
 
-    /* Info/Warning/Error boxes */
+    /* Info/Warning/Error boxes and Tier Cards */
     .stAlert {
         background-color: rgba(15, 23, 42, 0.5) !important;
         backdrop-filter: blur(16px) !important;
@@ -148,8 +148,44 @@ def inject_premium_css():
         border-radius: 16px !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
         color: #f8fafc !important;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3) !important;
     }
+
+    .tier-card {
+        background: linear-gradient(180deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.6) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        padding: 24px;
+        min-height: 250px;
+        margin-bottom: 20px;
+        transition: all 0.3s ease;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+    .tier-card:hover {
+        border-color: rgba(255, 255, 255, 0.3);
+        transform: translateY(-2px);
+    }
+    .tier-card h3 {
+        margin-top: 0;
+        font-size: 1.25rem !important;
+        color: #f8fafc !important;
+    }
+    .tier-card p {
+        color: #94a3b8;
+        font-size: 0.95rem;
+        margin-bottom: 1rem;
+    }
+    .tier-card ul {
+        padding-left: 20px;
+        margin-top: 16px;
+    }
+    .tier-card li {
+        margin-bottom: 8px;
+        color: #cbd5e1;
+        font-size: 0.95rem;
+    }
+    .tier-standard { border-top: 4px solid #3b82f6; }
+    .tier-heavy { border-top: 4px solid #10b981; }
+    .tier-enterprise { border-top: 4px solid #8b5cf6; }
     
     /* Streamlit Dialog Modal */
     div[role="dialog"] {
@@ -309,7 +345,7 @@ with colB:
         settings_modal()
 with colC:
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🔄 Reset", use_container_width=True, help="Start a new validation"):
+    if st.button("🔄 Reset Page", use_container_width=True, help="Restart the validation session"):
         reset_app()
 
 def render_sql_form(key_prefix):
@@ -368,27 +404,57 @@ if st.session_state.get('execution_tier') is None:
     st.query_params.clear()
     
     st.markdown("---")
-    st.subheader("Select a Data Validation Engine")
-    st.markdown("Choose the processing tier that deeply matches your data volume and source.")
+    st.markdown("<h2 style='text-align: center; margin-bottom: 0.5rem;'>Select a Data Validation and Reconciliation Engine</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 2.5rem;'>Choose the processing tier that deeply matches your data volume and source.</p>", unsafe_allow_html=True)
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.info("**🚀 Daily Ad-Hoc Checkups**\n\nPerfect for standard daily tasks.\n\n- Fast In-Memory Processing\n- Upload Excel & CSV files up to ~200MB\n- Run DB Queries up to ~500k rows")
-        if st.button("Launch Ad-Hoc Engine", type="primary", use_container_width=True):
+        st.markdown("""
+        <div class="tier-card tier-standard">
+            <h3>🚀 Standard Data Files</h3>
+            <p>Perfect for everyday data validation tasks.</p>
+            <ul>
+                <li>Fast In-Memory Processing</li>
+                <li>Upload Excel/CSV up to ~50MB</li>
+                <li>Run DB Queries up to ~100k rows</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Launch Standard Engine", type="primary", use_container_width=True):
             st.session_state.execution_tier = "standard"
             st.query_params["engine"] = "standard"
             st.rerun()
             
     with c2:
-        st.warning("**🏢 Massive Log Files**\n\nFor massive flat-file datasets.\n\n- Advanced Disk Streaming Engine\n- Avoids memory bottlenecks completely\n- Parses local Gigabyte flat files")
-        if st.button("Launch Massive File Engine", type="primary", use_container_width=True):
+        st.markdown("""
+        <div class="tier-card tier-heavy">
+            <h3>🏢 Massive Data Files</h3>
+            <p>For massive flat-file datasets.</p>
+            <ul>
+                <li>Advanced Disk Streaming System</li>
+                <li>Avoids memory bottlenecks completely</li>
+                <li>Parses Gigabyte-scale local flat files</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Launch Massive Engine", type="primary", use_container_width=True):
             st.session_state.execution_tier = "heavy"
             st.query_params["engine"] = "heavy"
             st.rerun()
             
     with c3:
-        st.error("**🌐 Enterprise SQL Warehouses**\n\nFor enterprise SQL data warehouses.\n\n- Zero data downloading required\n- Translates AI rules natively\n- Infinite database scale")
-        if st.button("Launch Enterprise SQL Engine", type="primary", use_container_width=True):
+        st.markdown("""
+        <div class="tier-card tier-enterprise">
+            <h3>🌐 Enterprise SQL Warehouses</h3>
+            <p>For enterprise DB infrastructure.</p>
+            <ul>
+                <li>Zero data downloading required</li>
+                <li>Translates AI rules organically to SQL</li>
+                <li>Infinite remote DB scale</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Launch Enterprise Engine", type="primary", use_container_width=True):
             st.session_state.execution_tier = "pushdown"
             st.query_params["engine"] = "pushdown"
             st.rerun()
