@@ -96,11 +96,11 @@ def inject_premium_css():
 
     /* Inputs, Textareas, Selectboxes */
     .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea {
-        background-color: rgba(15, 23, 42, 0.6) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        background-color: #1e293b !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
         border-radius: 12px !important;
         color: white !important;
-        transition: border-color 0.2s ease;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
     }
     
     .stTextInput>div>div>input:focus, .stSelectbox>div>div>div:focus, .stTextArea>div>div>textarea:focus {
@@ -567,7 +567,7 @@ if st.session_state.get('execution_tier') is None:
     st.subheader("We'd Love to Hear From You")
     st.markdown("Have feedback, feature requests, or need enterprise support? Let us know!")
     
-    with st.form("feedback_form"):
+    with st.form("feedback_form", clear_on_submit=True):
         c_name, c_email, c_phone = st.columns(3)
         f_name = c_name.text_input("Name")
         f_email = c_email.text_input("Email")
@@ -1083,7 +1083,7 @@ elif st.session_state.execution_tier == "pushdown":
         st.subheader("📁 System of Record")
         q1 = st.text_area("SQL Query 1", placeholder="SELECT * FROM main_finance_table", key="pd_q1")
     with c_q2:
-        st.subheader("📄 External Data")
+        st.subheader("📄 Target Data (To Compare)")
         q2 = st.text_area("SQL Query 2", placeholder="SELECT * FROM external_vendor_table", key="pd_q2")
 
     if conn_str_pd and q1 and q2:
