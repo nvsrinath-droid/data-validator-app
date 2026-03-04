@@ -102,13 +102,34 @@ if file1 and file2:
                                  options=conn1.get_sample_data(1).columns.tolist(),
                                  default=config.primary_keys)
         
-        # Column Mappings UI as an editable dataframe
-        st.markdown("**Column Mappings**")
+        # Column Mappings UI as an editable dataframe with DROPDOWNS
+        st.markdown("**Column Mappings** (Leave blank or delete a row to ignore a column)")
+        
+        # Get the actual column names from the uploaded files, plus a blank option
+        file1_cols = [""] + conn1.get_sample_data(1).columns.tolist()
+        file2_cols = [""] + conn2.get_sample_data(1).columns.tolist()
+        
         mapping_data = [{"File 1 Column": m.file1_column, "File 2 Column": m.file2_column} for m in config.column_mappings]
         mapping_df = pd.DataFrame(mapping_data)
-        
-        edited_mapping_df = st.data_editor(mapping_df, num_rows="dynamic", use_container_width=True)
-        
+
+        # Configure the dataframe to use dropdowns
+        edited_mapping_df = st.data_editor(
+            mapping_df, 
+            num_rows="dynamic", 
+            use_container_width=True,
+            column_config={
+                "File 1 Column": st.column_config.SelectboxColumn(
+                    "Source Column (File 1)",
+                    options=file1_cols,
+                    required=False
+                ),
+                "File 2 Column": st.column_config.SelectboxColumn(
+                    "Target Column (File 2)",
+                    options=file2_cols,
+                    required=False
+                )
+            }
+        )
         st.markdown("---")
         # --- Step 3: Run Comparison ---
         if st.button("🚀 Run Full Data Comparison", type="primary", use_container_width=True):
