@@ -23,25 +23,51 @@ st.markdown("""
 # Important imports
 from connectors.file_connector import FileConnector
 from connectors.sql_connector import SQLConnector
-from ai.agent import GeminiAgent
+from ai.agent import AIAgent
 from core.schemas import ValidationConfig, ColumnMap
 from core.comparator import DataComparator
 
 # Load ENV logic specifically for the web app missing a .env
 load_dotenv()
-api_key = os.environ.get("GEMINI_API_KEY")
+
+# Top 15 Models Dictionary mapping display name -> (litellm_model_string, required_env_var_name)
+AVAILABLE_MODELS = {
+    "Google Gemini 2.5 Flash": ("gemini/gemini-2.5-flash", "GEMINI_API_KEY"),
+    "Google Gemini 1.5 Pro": ("gemini/gemini-1.5-pro", "GEMINI_API_KEY"),
+    "OpenAI GPT-4o": ("gpt-4o", "OPENAI_API_KEY"),
+    "OpenAI GPT-4o Mini": ("gpt-4o-mini", "OPENAI_API_KEY"),
+    "OpenAI o1": ("o1", "OPENAI_API_KEY"),
+    "OpenAI o1-mini": ("o1-mini", "OPENAI_API_KEY"),
+    "Anthropic Claude 3.5 Sonnet": ("claude-3-5-sonnet-20241022", "ANTHROPIC_API_KEY"),
+    "Anthropic Claude 3.5 Haiku": ("claude-3-5-haiku-20241022", "ANTHROPIC_API_KEY"),
+    "Anthropic Claude 3 Opus": ("claude-3-opus-20240229", "ANTHROPIC_API_KEY"),
+    "Groq LLaMA 3 70B": ("groq/llama3-70b-8192", "GROQ_API_KEY"),
+    "Groq LLaMA 3 8B": ("groq/llama3-8b-8192", "GROQ_API_KEY"),
+    "Groq Mixtral 8x7B": ("groq/mixtral-8x7b-32768", "GROQ_API_KEY"),
+    "Cohere Command R+": ("command-r-plus", "COHERE_API_KEY"),
+    "Cohere Command R": ("command-r", "COHERE_API_KEY"),
+    "Mistral Large": ("mistral/mistral-large-latest", "MISTRAL_API_KEY")
+}
 
 # --- Sidebar Configuration ---
 with st.sidebar:
     st.markdown("<div style='font-size: 50px;'>🎯</div>", unsafe_allow_html=True)
-    st.title("Settings")
+    st.title("AI Settings")
     
-    if not api_key:
-        api_key_input = st.text_input("Enter Gemini API Key", type="password", help="Get this from Google AI Studio")
-        if api_key_input:
-            api_key = api_key_input
-            os.environ["GEMINI_API_KEY"] = api_key
-            st.rerun() # Force an immediate refresh
+    # Model Selection
+    selected_model_display = st.selectbox("Select AI Model", list(AVAILABLE_MODELS.keys()))
+    litellm_model_str, required_env_key = AVAILABLE_MODELS[selected_model_display]
+    
+    # Key Storage
+    api_key_input = st.text_input(f"Enter {required_env_key}", type="password", help=f"Required for {selected_model_display}")
+    
+    # The active key for the *selected* model
+    active_api_key = api_key_input if api_key_input else os.environ.get(required_env_key)
+
+    if not active_api_key:
+        st.warning(f"Please provide your {required_env_key} to use {selected_model_display}")
+    else:
+        st.success(f"{selected_model_display} Ready!")
         
     st.markdown("---")
     st.markdown("""
@@ -73,7 +99,7 @@ if 'ai_config' not in st.session_state:
 colA, colB = st.columns([3, 1])
 with colA:
     st.title("🎯 TrueAlign Data")
-    st.markdown("Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of Google Gemini.")
+    st.markdown("Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of AI.")
 with colB:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🔄 Start New Validation", use_container_width=True):
@@ -138,8 +164,8 @@ with col2:
         source_2 = render_sql_form(f"src2_{st.session_state.uploader_key}")
 
 if source_1 and source_2:
-    if not api_key:
-         st.warning("Please provide a Gemini API Key in the sidebar to continue.")
+    if not active_api_key:
+         st.warning("Please configure an AI Model in the sidebar to continue.")
          st.stop()
          
     # Init connectors dynamically based on the user's choice
@@ -160,13 +186,13 @@ if source_1 and source_2:
     st.subheader("🧠 Step 2: AI Schema Mapping")
     
     # Generate Config Button
-    if st.button("✨ Analyze Files with Gemini", type="primary"):
-        with st.spinner('Gemini is reading your spreadsheets and building a mapping schema...'):
+    if st.button(f"✨ Analyze Files with {selected_model_display}", type="primary"):
+        with st.spinner(f'{selected_model_display} is reading your structured data and building a mapping schema...'):
             try:
                 sample1 = conn1.get_sample_data(5).to_csv(index=False)
                 sample2 = conn2.get_sample_data(5).to_csv(index=False)
                 
-                agent = GeminiAgent(api_key=api_key)
+                agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
                 st.session_state.ai_config = agent.suggest_configuration(sample1, sample2)
                 st.success("Analysis Complete!")
             except Exception as e:
@@ -251,8 +277,8 @@ if source_1 and source_2:
                 # Execute AI Logic if rules exist
                 rule_code = None
                 if rules_dict:
-                    st.toast("Generating custom validation rules with Gemini...", icon='🧠')
-                    agent = GeminiAgent(api_key=api_key)
+                    st.toast(f"Generating custom validation rules with {selected_model_display}...", icon='🧠')
+                    agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
                     rule_code = agent.generate_rule_evaluator_code(rules_dict)
                 
                 # Execute Core Logic

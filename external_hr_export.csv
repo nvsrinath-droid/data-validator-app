@@ -1,0 +1,6 @@
+emp_id,full_name,department,salary,status
+EMP001,Alice Smith,Engineering,120000.00,Active
+EMP002,Bob Jones,Marketing,95000.00,Active
+EMP003,Charlie Brown,Sales,110000.50,Active
+EMP004,Diana Prince,Engineering,145000.00,Active
+EMP006,Frank Castle,Security,90000.00,Active

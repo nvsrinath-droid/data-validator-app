@@ -1,25 +1,54 @@
 import os
-from google import genai
-from google.genai import types
 import json
+from litellm import completion
 from core.schemas import ValidationConfig
 
-class GeminiAgent:
-    """Interacts with the Gemini API to suggest configurations."""
+class AIAgent:
+    """Interacts with various LLM providers (Google, OpenAI, Anthropic, etc.) via LiteLLM."""
     
-    def __init__(self, api_key: str = None):
-        if not api_key:
-            api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("Gemini API key is required. Set it in .env or pass it directly.")
+    def __init__(self, model_name: str, api_key: str):
+        """
+        Initializes the agent.
+        Args:
+            model_name: The LiteLLM formatted model string (e.g., 'gpt-4o', 'gemini/gemini-1.5-pro', 'claude-3-5-sonnet-20240620')
+            api_key: The API key for the respective provider.
+        """
+        self.model_name = model_name
+        self.api_key = api_key
         
-        # Initialize the new genai client
-        self.client = genai.Client(api_key=api_key)
-        self.model_name = 'gemini-2.5-flash'
+        # LiteLLM routing uses environment variables under the hood for some providers
+        if "gemini" in model_name.lower():
+            os.environ["GEMINI_API_KEY"] = api_key
+        elif "gpt" in model_name.lower() or "o1" in model_name.lower():
+            os.environ["OPENAI_API_KEY"] = api_key
+        elif "claude" in model_name.lower():
+            os.environ["ANTHROPIC_API_KEY"] = api_key
+        elif "groq" in model_name.lower():
+            os.environ["GROQ_API_KEY"] = api_key
+            
+    def _call_llm(self, prompt: str, schema_class=None, is_json=False) -> str:
+        """Helper to call litellm with correct JSON forcing if requested."""
+        messages = [{"role": "user", "content": prompt}]
         
+        kwargs = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": 0.1,
+        }
+        
+        # If we need structured JSON output (like the config generation)
+        if is_json:
+            kwargs["response_format"] = {"type": "json_object"}
+            
+        try:
+            response = completion(**kwargs)
+            return response.choices[0].message.content
+        except Exception as e:
+            raise RuntimeError(f"LLM Provider Error: {str(e)}")
+
     def suggest_configuration(self, file1_sample: str, file2_sample: str) -> ValidationConfig:
         """
-        Takes string representations of the file samples and uses Gemini to 
+        Takes string representations of the file samples and uses the LLM to 
         suggest a configuration schema mapping the files.
         """
         prompt = f"""
@@ -43,25 +72,28 @@ class GeminiAgent:
         }}
         """
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=ValidationConfig,
-                temperature=0.1
-            ),
-        )
+        response_text = self._call_llm(prompt, is_json=True)
 
-        # Parse the response into our Pydantic model
-        config_data = json.loads(response.text)
-        return ValidationConfig(**config_data)
+        # Parse the response
+        try:
+            # Strip markdown block formatting if the model ignored response_format
+            clean_text = response_text.strip()
+            if clean_text.startswith("```json"):
+                clean_text = clean_text[7:]
+            if clean_text.startswith("```"):
+                clean_text = clean_text[3:]
+            if clean_text.endswith("```"):
+                clean_text = clean_text[:-3]
+                
+            config_data = json.loads(clean_text)
+            return ValidationConfig(**config_data)
+        except Exception as e:
+             raise ValueError(f"Failed to parse LLM JSON mapping: {str(e)}\nRaw Response: {response_text}")
 
     def generate_rule_evaluator_code(self, rules_dict: dict) -> str:
         """
         Takes a dictionary mapping column names to plain English validation rules.
-        Uses Gemini to generate a Python function `def evaluate_rules(row):` that 
-        takes a Pandas Row and returns a list of dictionaries (or empty list if passed).
+        Uses the LLM to generate a Python function `def evaluate_rules(row):`
         """
         prompt = f"""
         You are an expert Python data engineer. I have a pandas dataframe containing data from two different files.
@@ -78,12 +110,8 @@ class GeminiAgent:
         - Do not include any explanations, imports, or markdown formatting like ```python. Just the raw python code.
         """
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-        )
-
-        code = response.text.strip()
+        code = self._call_llm(prompt, is_json=False).strip()
+        
         if code.startswith("```python"):
             code = code[9:]
         if code.startswith("```"):
