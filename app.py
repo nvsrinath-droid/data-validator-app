@@ -96,8 +96,8 @@ def inject_premium_css():
 
     /* Inputs, Textareas, Selectboxes */
     .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea {
-        background-color: #1e293b !important;
-        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        background-color: #334155 !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
         border-radius: 12px !important;
         color: white !important;
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -202,14 +202,14 @@ def inject_premium_css():
     
     /* File Uploader styling */
     [data-testid="stFileUploadDropzone"] {
-        background: linear-gradient(180deg, rgba(30, 41, 59, 0.5) 0%, rgba(15, 23, 42, 0.4) 100%) !important;
-        border: 2px dashed rgba(255, 255, 255, 0.15) !important;
+        background: rgba(255, 255, 255, 0.08) !important;
+        border: 2px dashed rgba(255, 255, 255, 0.3) !important;
         border-radius: 16px !important;
         padding: 30px 20px !important;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
     [data-testid="stFileUploadDropzone"]:hover {
-        background: linear-gradient(180deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.7) 100%) !important;
+        background: rgba(255, 255, 255, 0.12) !important;
         border-color: #3b82f6 !important;
         box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2) !important;
         transform: translateY(-2px);
