@@ -162,10 +162,15 @@ if file1 and file2:
                 new_mappings = []
                 rules_dict = {}
                 for index, row in edited_mapping_df.iterrows():
-                    c1 = str(row.get('File 1 Column', '')).strip()
-                    c2 = str(row.get('File 2 Column', '')).strip()
-                    rule = str(row.get('Validation Rule (Optional)', '')).strip()
-                    if rule == 'nan' or rule == 'None': rule = ""
+                    c1_raw = row.get('File 1 Column')
+                    c2_raw = row.get('File 2 Column')
+                    rule_raw = row.get('Validation Rule (Optional)')
+                    
+                    c1 = str(c1_raw).strip() if pd.notna(c1_raw) and c1_raw is not None else ""
+                    c2 = str(c2_raw).strip() if pd.notna(c2_raw) and c2_raw is not None else ""
+                    rule = str(rule_raw).strip() if pd.notna(rule_raw) and rule_raw is not None else ""
+                    
+                    if rule.lower() == 'nan': rule = ""
                     
                     # Only map if both columns are provided and not NaN
                     if c1 and c2 and c1.lower() != 'nan' and c2.lower() != 'nan' and c1 != 'None' and c2 != 'None':
