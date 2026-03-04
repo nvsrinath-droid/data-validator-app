@@ -299,8 +299,8 @@ if 'ai_config' not in st.session_state:
 # Top level reset button
 colA, colB, colC = st.columns([5, 1, 1])
 with colA:
-    st.title("🎯 TrueAlign Data")
-    st.markdown("Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of AI.")
+    st.markdown("<a href='/' target='_self' style='text-decoration: none;'><h1 style='display:inline; margin: 0; padding: 0;'>🎯 TrueAlign Data</h1></a>", unsafe_allow_html=True)
+    st.markdown("<br>Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of AI.", unsafe_allow_html=True)
 with colB:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("⚙️ Settings", use_container_width=True):
@@ -353,25 +353,25 @@ def render_sql_form(key_prefix):
 # --- SPLASH PAGE ROUTER ---
 if st.session_state.get('execution_tier') is None:
     st.markdown("---")
-    st.subheader("How would you like to validate today?")
-    st.markdown("Select an execution engine based on your data scale.")
+    st.subheader("Select a Reconciliation Engine")
+    st.markdown("Choose the processing tier that deeply matches your data volume and source.")
     
     c1, c2, c3 = st.columns(3)
     with c1:
         st.info("**🚀 Daily Ad-Hoc Checkups**\n\nPerfect for standard daily tasks.\n\n- Fast In-Memory Processing\n- Upload Excel & CSV files up to ~200MB\n- Run DB Queries up to ~500k rows")
-        if st.button("Launch Ad-Hoc Engine", use_container_width=True):
+        if st.button("Launch Ad-Hoc Engine", type="primary", use_container_width=True):
             st.session_state.execution_tier = "standard"
             st.rerun()
             
     with c2:
         st.warning("**🏢 Massive Log Files**\n\nFor massive flat-file datasets.\n\n- Advanced Disk Streaming Engine\n- Avoids memory bottlenecks completely\n- Parses local Gigabyte flat files")
-        if st.button("Launch Massive File Engine", use_container_width=True):
+        if st.button("Launch Massive File Engine", type="primary", use_container_width=True):
             st.session_state.execution_tier = "heavy"
             st.rerun()
             
     with c3:
         st.error("**🌐 Enterprise SQL Warehouses**\n\nFor enterprise SQL data warehouses.\n\n- Zero data downloading required\n- Translates AI rules natively\n- Infinite database scale")
-        if st.button("Launch Enterprise SQL Engine", use_container_width=True):
+        if st.button("Launch Enterprise SQL Engine", type="primary", use_container_width=True):
             st.session_state.execution_tier = "pushdown"
             st.rerun()
             
