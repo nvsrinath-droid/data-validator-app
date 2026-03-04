@@ -46,23 +46,42 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**How to use:**\n1. Upload your two files.\n2. Review the AI's mapping guesses.\n3. Run the validation report!")
 
-# --- Main Interface ---
-st.title("🕵️ Intelligent Data Validator")
-st.markdown("Easily find missing rows and mismatched values between any two spreadsheets using the power of Google Gemini.")
+# State management for full app reset
+if 'uploader_key' not in st.session_state:
+    st.session_state.uploader_key = 0
+
+def reset_app():
+    # Clear the generated data to restart the process
+    for k in ['ai_config', 'results', 'df1_full', 'df2_full']:
+        if k in st.session_state:
+            del st.session_state[k]
+    # Increment key to clear file uploaders
+    st.session_state.uploader_key += 1
+    st.rerun()
+
+# We use session state to hold the AI's configuration so it doesn't regenerate on every button click
+if 'ai_config' not in st.session_state:
+    st.session_state.ai_config = None
+
+# Top level reset button
+colA, colB = st.columns([3, 1])
+with colA:
+    st.title("🕵️ Intelligent Data Validator")
+    st.markdown("Easily find missing rows and mismatched values between any two spreadsheets using the power of Google Gemini.")
+with colB:
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🔄 Start New Validation", use_container_width=True):
+        reset_app()
 
 # Step 1: Upload Files
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("📁 Source File (System of Record)")
-    file1 = st.file_uploader("Upload File 1", type=["csv", "xlsx"], key="file1")
+    file1 = st.file_uploader("Upload File 1", type=["csv", "xlsx"], key=f"file1_{st.session_state.uploader_key}")
 
 with col2:
     st.subheader("📄 External File (To Compare)")
-    file2 = st.file_uploader("Upload File 2", type=["csv", "xlsx"], key="file2")
-
-# We use session state to hold the AI's configuration so it doesn't regenerate on every button click
-if 'ai_config' not in st.session_state:
-    st.session_state.ai_config = None
+    file2 = st.file_uploader("Upload File 2", type=["csv", "xlsx"], key=f"file2_{st.session_state.uploader_key}")
 
 if file1 and file2:
     if not api_key:
@@ -224,3 +243,7 @@ if file1 and file2:
                      csv_data = to_csv_download(missing_f2)
                      st.download_button("Download Missing (External) CSV", data=csv_data, file_name="missing_external.csv", mime="text/csv")
                      st.dataframe(pd.DataFrame(missing_f2))
+            
+            st.markdown("---")
+            if st.button("🔄 Start New Data Validation", type="secondary", use_container_width=True):
+                reset_app()
