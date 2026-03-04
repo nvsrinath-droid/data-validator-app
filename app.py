@@ -33,7 +33,7 @@ api_key = os.environ.get("GEMINI_API_KEY")
 
 # --- Sidebar Configuration ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/1454/1454558.png", width=50) # Target icon
+    st.markdown("<div style='font-size: 50px;'>🎯</div>", unsafe_allow_html=True)
     st.title("Settings")
     
     if not api_key:
