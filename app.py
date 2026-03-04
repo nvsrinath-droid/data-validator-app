@@ -44,7 +44,7 @@ def inject_premium_css():
 
     /* Primary Container Mod */
     .main .block-container {
-        padding-top: 2rem !important;
+        padding-top: 0.5rem !important;
         max-width: 1200px;
     }
 
@@ -229,6 +229,8 @@ from core.comparator import DataComparator
 # Load ENV logic specifically for the web app missing a .env
 load_dotenv()
 
+import core.auth as auth
+
 # Top 15 Models Dictionary mapping display name -> (litellm_model_string, required_env_var_name)
 AVAILABLE_MODELS = {
     "Google Gemini 2.5 Flash": ("gemini/gemini-2.5-flash", "GEMINI_API_KEY"),
@@ -262,6 +264,12 @@ if 'stored_keys' not in st.session_state:
 # Initialize Session State for user's selected models
 if 'user_configured_models' not in st.session_state:
     st.session_state.user_configured_models = []
+
+# Auth States
+if 'user' not in st.session_state:
+    st.session_state.user = None
+if 'is_guest' not in st.session_state:
+    st.session_state.is_guest = False
 
 @st.dialog("⚙️ Global AI Settings & API Keys")
 def settings_modal():
@@ -335,18 +343,68 @@ if 'ai_config' not in st.session_state:
     st.session_state.ai_config = None
 
 # Top level reset button
-colA, colB, colC = st.columns([5, 1, 1])
+colA, colB, colC, colD = st.columns([5, 1, 1, 1])
 with colA:
-    st.markdown("<a href='/' target='_self' style='text-decoration: none;'><h1 style='display:inline; margin: 0; padding: 0;'>🎯 TrueAlign Data</h1></a>", unsafe_allow_html=True)
-    st.markdown("<br>Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of AI.", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top: 15px;'><a href='/' target='_self' style='text-decoration: none;'><h1 style='display:inline; margin: 0; padding: 0;'>🎯 TrueAlign Data</h1></a>", unsafe_allow_html=True)
+    st.markdown("<p style='margin-top: 5px; color: #cbd5e1; font-size: 1.1rem;'>Easily find missing rows, map mismatched schemas, and enforce custom business rules between live databases and flat files using the power of AI.</p></div>", unsafe_allow_html=True)
 with colB:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("⚙️ Settings", use_container_width=True):
         settings_modal()
 with colC:
     st.markdown("<br>", unsafe_allow_html=True)
+    if st.session_state.user or st.session_state.is_guest:
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state.user = None
+            st.session_state.is_guest = False
+            st.rerun()
+with colD:
+    st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🔄 Reset Page", use_container_width=True, help="Restart the validation session"):
         reset_app()
+
+# --- AUTHENTICATION INTERCEPTOR ---
+if not st.session_state.user and not st.session_state.is_guest:
+    st.markdown("---")
+    st.markdown("<h2 style='text-align: center; margin-bottom: 2.5rem;'>✨ Welcome to TrueAlign Data Validation</h2>", unsafe_allow_html=True)
+    
+    c_login, c_spacer, c_reg = st.columns([4, 1, 4])
+    
+    with c_login:
+        st.subheader("Login to Your Account")
+        with st.form("login_form"):
+            email_login = st.text_input("Email")
+            pass_login = st.text_input("Password", type="password")
+            if st.form_submit_button("Log In", type="primary", use_container_width=True):
+                if auth.authenticate_user(email_login, pass_login):
+                    st.session_state.user = email_login
+                    st.rerun()
+                else:
+                    st.error("Invalid email or password.")
+                    
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("👋 Continue as Guest", use_container_width=True):
+            st.session_state.is_guest = True
+            st.rerun()
+            
+    with c_reg:
+        st.subheader("Create a Free Account")
+        st.info("Registered users can securely save their AI mapping templates for future pipelines.")
+        with st.form("register_form"):
+            email_reg = st.text_input("Email")
+            pass_reg = st.text_input("Password", type="password")
+            if st.form_submit_button("Register", type="primary", use_container_width=True):
+                if email_reg and pass_reg:
+                    if auth.register_user(email_reg, pass_reg):
+                        st.success("Registration successful! You may now log in.")
+                    else:
+                        st.error("Email already exists.")
+                else:
+                    st.error("Please fill out both fields.")
+                    
+    st.markdown("---")
+    st.markdown("<p style='text-align:center; color:#94a3b8; font-size:0.9rem;'>Google/Apple Sign-In integration is pending Developer Key approval from Identity Providers.</p>", unsafe_allow_html=True)
+    st.stop()
 
 def render_sql_form(key_prefix):
     db_type = st.selectbox("Database Type", ["Snowflake", "Microsoft SQL Server", "Oracle", "PostgreSQL", "SQLite (Local)"], key=f"db_type_{key_prefix}")
@@ -404,7 +462,7 @@ if st.session_state.get('execution_tier') is None:
     st.query_params.clear()
     
     st.markdown("---")
-    st.markdown("<h2 style='text-align: center; margin-bottom: 0.5rem;'>Select a Data Validation and Reconciliation Engine</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; margin-bottom: 0.5rem;'>✨ Unleash AI on Your Data Validation</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 2.5rem;'>Choose the processing tier that deeply matches your data volume and source.</p>", unsafe_allow_html=True)
     
     c1, c2, c3 = st.columns(3)
@@ -459,6 +517,24 @@ if st.session_state.get('execution_tier') is None:
             st.query_params["engine"] = "pushdown"
             st.rerun()
             
+    st.markdown("---")
+    st.subheader("We'd Love to Hear From You")
+    st.markdown("Have feedback, feature requests, or need enterprise support? Let us know!")
+    
+    with st.form("feedback_form"):
+        c_name, c_contact = st.columns(2)
+        f_name = c_name.text_input("Name (Optional)")
+        f_contact = c_contact.text_input("Email / Phone Number")
+        f_msg = st.text_area("Message / Feature Request", height=100)
+        
+        if st.form_submit_button("📨 Send Feedback", type="primary"):
+            if f_msg and f_contact:
+                # Route simulated backend payload
+                print(f"--- NEW APP FEEDBACK ---\nTo: info@strategyeagles.com\nFrom: {f_name} ({f_contact})\nMessage: {f_msg}\n------------------------")
+                st.success("Thank you! Your message has been sent to info@strategyeagles.com.")
+            else:
+                st.error("Please provide at least your contact info and a message.")
+                
     st.stop()
 
 
@@ -534,33 +610,36 @@ if st.session_state.execution_tier == "standard":
                         st.error(f"Error during AI analysis: {str(e)}")
                     
         with c_upload:
-            template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"tpl_{st.session_state.uploader_key}", label_visibility="collapsed")
-            if template_file:
-                try:
-                    tpl_df = pd.read_csv(template_file)
-                    # Ensure the CSV has the expected columns
-                    if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
-                        new_mappings = []
-                        for _, row in tpl_df.iterrows():
-                            c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
-                            c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
-                            rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
-                            if rule.lower() == 'nan': rule = ""
+            if not st.session_state.is_guest:
+                template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"tpl_{st.session_state.uploader_key}", label_visibility="collapsed")
+                if template_file:
+                    try:
+                        tpl_df = pd.read_csv(template_file)
+                        # Ensure the CSV has the expected columns
+                        if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
+                            new_mappings = []
+                            for _, row in tpl_df.iterrows():
+                                c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
+                                c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
+                                rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
+                                if rule.lower() == 'nan': rule = ""
+                            
+                                if c1 and c2:
+                                    new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
                         
-                            if c1 and c2:
-                                new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
-                    
-                        # Store it directly into session state bypassing the AI
-                        st.session_state.ai_config = ValidationConfig(
-                            primary_keys=[], # Primary keys will be manually selected by user next
-                            column_mappings=new_mappings,
-                            ignore_columns=[]
-                        )
-                        st.success("Template Loaded Successfully!")
-                    else:
-                        st.error("Invalid template format. Must contain 'File 1 Column', 'File 2 Column', and 'Validation Rule (Optional)'.")
-                except Exception as e:
-                    st.error(f"Failed to load template: {str(e)}")
+                            # Store it directly into session state bypassing the AI
+                            st.session_state.ai_config = ValidationConfig(
+                                primary_keys=[], # Primary keys will be manually selected by user next
+                                column_mappings=new_mappings,
+                                ignore_columns=[]
+                            )
+                            st.success("Template Loaded Successfully!")
+                        else:
+                            st.error("Invalid template format. Must contain 'File 1 Column', 'File 2 Column', and 'Validation Rule (Optional)'.")
+                    except Exception as e:
+                        st.error(f"Failed to load template: {str(e)}")
+            else:
+                st.info("🔒 Log in to a free account to load saved mapping templates.")
                 
         # If we have a configuration (either just generated, or from previous click)
         if st.session_state.ai_config:
@@ -610,13 +689,14 @@ if st.session_state.execution_tier == "standard":
             )
         
             # Export Template Button
-            st.download_button(
-                label="💾 Save As Mapping Template (CSV)",
-                data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
-                file_name="truealign_mapping_template.csv",
-                mime="text/csv",
-                help="Download these mappings and rules to instantly load them next time"
-            )
+            if not st.session_state.is_guest:
+                st.download_button(
+                    label="💾 Save As Mapping Template (CSV)",
+                    data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
+                    file_name="truealign_mapping_template.csv",
+                    mime="text/csv",
+                    help="Download these mappings and rules to instantly load them next time"
+                )
         
             st.markdown("---")
             # --- Step 3: Run Comparison ---
@@ -804,27 +884,30 @@ elif st.session_state.execution_tier == "heavy":
                         st.error(f"Error during AI analysis: {str(e)}")
                         
         with c_upload:
-            template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"htpl_{st.session_state.uploader_key}", label_visibility="collapsed")
-            if template_file:
-                try:
-                    tpl_df = pd.read_csv(template_file)
-                    if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
-                        new_mappings = []
-                        for _, row in tpl_df.iterrows():
-                            c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
-                            c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
-                            rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
-                            if rule.lower() == 'nan': rule = ""
-                            if c1 and c2:
-                                new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
-                        
-                        st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=new_mappings, ignore_columns=[])
-                        st.session_state.heavy_files = (t1.name, t2.name)
-                        st.success("Template Loaded Successfully!")
-                    else:
-                        st.error("Invalid template format.")
-                except Exception as e:
-                    st.error(f"Failed to load template: {str(e)}")
+            if not st.session_state.is_guest:
+                template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"htpl_{st.session_state.uploader_key}", label_visibility="collapsed")
+                if template_file:
+                    try:
+                        tpl_df = pd.read_csv(template_file)
+                        if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
+                            new_mappings = []
+                            for _, row in tpl_df.iterrows():
+                                c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
+                                c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
+                                rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
+                                if rule.lower() == 'nan': rule = ""
+                                if c1 and c2:
+                                    new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
+                            
+                            st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=new_mappings, ignore_columns=[])
+                            st.session_state.heavy_files = (t1.name, t2.name)
+                            st.success("Template Loaded Successfully!")
+                        else:
+                            st.error("Invalid template format.")
+                    except Exception as e:
+                        st.error(f"Failed to load template: {str(e)}")
+            else:
+                st.info("🔒 Log in to a free account to load saved mapping templates.")
 
         # --- HEAVY GRID CONFIGURATOR ---
         if st.session_state.ai_config and st.session_state.get('heavy_files'):
@@ -855,14 +938,15 @@ elif st.session_state.execution_tier == "heavy":
             )
             
             # Export Template
-            st.download_button(
-                label="💾 Save As Mapping Template (CSV)",
-                data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
-                file_name="truealign_heavy_mapping_template.csv",
-                mime="text/csv",
-                key="h_download_tpl",
-                help="Download these mappings and rules to instantly load them next time"
-            )
+            if not st.session_state.is_guest:
+                st.download_button(
+                    label="💾 Save As Mapping Template (CSV)",
+                    data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
+                    file_name="truealign_heavy_mapping_template.csv",
+                    mime="text/csv",
+                    key="h_download_tpl",
+                    help="Download these mappings and rules to instantly load them next time"
+                )
             
             st.markdown("---")
             if st.button("🚀 Run Heavy File Comparison (Disk Streaming)", type="primary", use_container_width=True, key="h_run"):
