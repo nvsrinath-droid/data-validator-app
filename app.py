@@ -96,21 +96,22 @@ def inject_premium_css():
 
     /* Inputs, Textareas, Selectboxes */
     .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea {
-        background-color: #334155 !important;
-        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        background-color: #ffffff !important;
+        border: 2px solid #3b82f6 !important;
         border-radius: 12px !important;
-        color: white !important;
+        color: #0f172a !important;
+        font-weight: 500 !important;
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
     }
     
     .stTextInput>div>div>input:focus, .stSelectbox>div>div>div:focus, .stTextArea>div>div>textarea:focus {
-        border-color: #3b82f6 !important;
-        box-shadow: 0 0 0 1px #3b82f6 !important;
+        border-color: #2563eb !important;
+        box-shadow: 0 0 0 1px #2563eb !important;
     }
 
     /* Text inside Inputs */
     .stTextInput>div>div>input::placeholder, .stTextArea>div>div>textarea::placeholder {
-        color: #94a3b8 !important;
+        color: #64748b !important;
     }
 
     /* Hide 'Press Enter to Submt' helper text on forms */
@@ -202,15 +203,18 @@ def inject_premium_css():
     
     /* File Uploader styling */
     [data-testid="stFileUploadDropzone"] {
-        background: rgba(255, 255, 255, 0.08) !important;
-        border: 2px dashed rgba(255, 255, 255, 0.3) !important;
+        background: #ffffff !important;
+        border: 2px dashed #3b82f6 !important;
         border-radius: 16px !important;
         padding: 30px 20px !important;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
     }
+    [data-testid="stFileUploadDropzone"] * {
+        color: #0f172a !important;
+    }
     [data-testid="stFileUploadDropzone"]:hover {
-        background: rgba(255, 255, 255, 0.12) !important;
-        border-color: #3b82f6 !important;
+        background: #f8fafc !important;
+        border-color: #2563eb !important;
         box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2) !important;
         transform: translateY(-2px);
     }
@@ -524,8 +528,8 @@ if st.session_state.get('execution_tier') is None:
             <p>Perfect for everyday data validation tasks.</p>
             <ul>
                 <li>Fast In-Memory Processing</li>
-                <li>Upload Excel/CSV up to ~200MB</li>
-                <li>Run DB Queries up to ~500k rows</li>
+                <li>Upload Excel/CSV up to ~50MB</li>
+                <li>Run DB Queries up to ~100k rows</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -876,17 +880,20 @@ if st.session_state.execution_tier == "standard":
 elif st.session_state.execution_tier == "heavy":
     st.markdown(f"**🟢 Active Engine:** Massive Data Files")
     
-    # Step 1: Data Sources Selection (Files Only for Heavy Engine)
+    # Step 1: Data Sources Selection (Direct Disk Access for Maximum Efficiency)
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("📁 Source Data (System of Record)")
-        source_1 = st.file_uploader("Upload MASSIVE File 1", type=["csv"], key=f"hfile1_{st.session_state.uploader_key}")
+        source_1_path = st.text_input("Local File Path 1 (e.g. C:/data/source.csv)", key=f"hfile1_{st.session_state.uploader_key}")
 
     with col2:
         st.subheader("📄 Target Data (To Compare)")
-        source_2 = st.file_uploader("Upload MASSIVE File 2", type=["csv"], key=f"hfile2_{st.session_state.uploader_key}")
+        source_2_path = st.text_input("Local File Path 2 (e.g. C:/data/target.csv)", key=f"hfile2_{st.session_state.uploader_key}")
 
-    if source_1 and source_2:
+    import os
+    if source_1_path and source_2_path and os.path.exists(source_1_path) and os.path.exists(source_2_path):
+        t1_name = source_1_path
+        t2_name = source_2_path
         st.markdown("---")
         st.subheader("🧠 Step 2: Select AI Model & Map Schema")
         
@@ -904,18 +911,6 @@ elif st.session_state.execution_tier == "heavy":
              st.warning(f"⚠️ You must configure your `{required_env_key}` in the ⚙️ Settings menu (top right) to use {selected_model_display}.")
              st.stop()
              
-        # Save large files to disk temporarily so DuckDB can read them without RAM overload
-        import tempfile
-        import os
-        
-        t1 = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
-        t1.write(source_1.getvalue())
-        t1.close()
-        
-        t2 = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
-        t2.write(source_2.getvalue())
-        t2.close()
-        
         # UI for choosing AI Mapping Generation vs Uploading a Heavy Template
         c_generate, c_upload = st.columns(2)
         
@@ -925,12 +920,12 @@ elif st.session_state.execution_tier == "heavy":
                     try:
                         # DuckDB can sniff headers insanely fast from massive files
                         import duckdb
-                        s1_header = duckdb.query(f"SELECT * FROM read_csv_auto('{t1.name}') LIMIT 5").df()
-                        s2_header = duckdb.query(f"SELECT * FROM read_csv_auto('{t2.name}') LIMIT 5").df()
+                        s1_header = duckdb.query(f"SELECT * FROM read_csv_auto('{t1_name}') LIMIT 5").df()
+                        s2_header = duckdb.query(f"SELECT * FROM read_csv_auto('{t2_name}') LIMIT 5").df()
                         
                         agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
                         st.session_state.ai_config = agent.suggest_configuration(s1_header.to_csv(index=False), s2_header.to_csv(index=False))
-                        st.session_state.heavy_files = (t1.name, t2.name)
+                        st.session_state.heavy_files = (t1_name, t2_name)
                         st.success("AI Schema Analysis Complete!")
                     except Exception as e:
                         st.error(f"Error during AI analysis: {str(e)}")
@@ -952,7 +947,7 @@ elif st.session_state.execution_tier == "heavy":
                                     new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
                             
                             st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=new_mappings, ignore_columns=[])
-                            st.session_state.heavy_files = (t1.name, t2.name)
+                            st.session_state.heavy_files = (t1_name, t2_name)
                             st.success("Template Loaded Successfully!")
                         else:
                             st.error("Invalid template format.")
@@ -1021,9 +1016,6 @@ elif st.session_state.execution_tier == "heavy":
                         st.session_state.results = heavy_engine.compare(f1_path, f2_path)
                         st.toast('Massive Comparison Complete!', icon='🐘')
                         
-                        # Clean up temp files
-                        os.unlink(f1_path)
-                        os.unlink(f2_path)
                         st.session_state.heavy_files = None
                     except Exception as e:
                         st.error(f"DuckDB Query Failed: {str(e)}")
