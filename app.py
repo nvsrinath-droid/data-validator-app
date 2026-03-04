@@ -488,6 +488,183 @@ if st.session_state.execution_tier == "standard":
                          st.download_button("Download Missing (External) CSV", data=csv_data, file_name="missing_external.csv", mime="text/csv")
                          st.dataframe(pd.DataFrame(missing_f2))
             
-                st.markdown("---")
-                if st.button("🔄 Start New Data Validation", type="secondary", use_container_width=True):
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Start New Validation (Bottom)", use_container_width=True):
+            reset_app()
+
+elif st.session_state.execution_tier == "heavy":
+    st.markdown(f"**🟢 Active Engine:** Heavy File Engine (DuckDB Disk Streaming)")
+    
+    # Step 1: Data Sources Selection (Files Only for Heavy Engine)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("📁 Source Data (System of Record)")
+        source_1 = st.file_uploader("Upload MASSIVE File 1", type=["csv"], key=f"hfile1_{st.session_state.uploader_key}")
+
+    with col2:
+        st.subheader("📄 External Data (To Compare)")
+        source_2 = st.file_uploader("Upload MASSIVE File 2", type=["csv"], key=f"hfile2_{st.session_state.uploader_key}")
+
+    if source_1 and source_2:
+        st.markdown("---")
+        st.subheader("🧠 Step 2: Select AI Model & Map Schema")
+        
+        if not st.session_state.user_configured_models:
+            st.warning("⚠️ No AI Models configured. Please click the ⚙️ Settings menu (top right) to add a model and API key.")
+            st.stop()
+            
+        c_model, _ = st.columns([1, 2])
+        with c_model:
+            selected_model_display = st.selectbox("Active AI Model", st.session_state.user_configured_models, key="heavy_model")
+            litellm_model_str, required_env_key = AVAILABLE_MODELS[selected_model_display]
+            active_api_key = st.session_state.stored_keys.get(required_env_key, "")
+
+        if not active_api_key:
+             st.warning(f"⚠️ You must configure your `{required_env_key}` in the ⚙️ Settings menu (top right) to use {selected_model_display}.")
+             st.stop()
+             
+        # Save large files to disk temporarily so DuckDB can read them without RAM overload
+        import tempfile
+        import os
+        
+        t1 = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+        t1.write(source_1.getvalue())
+        t1.close()
+        
+        t2 = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+        t2.write(source_2.getvalue())
+        t2.close()
+        
+        # UI for choosing AI Mapping Generation vs Uploading a Heavy Template
+        c_generate, c_upload = st.columns(2)
+        
+        with c_generate:
+            if st.button(f"✨ Auto-Map Header Rows with {selected_model_display}", type="primary", use_container_width=True, key="h_analyze"):
+                with st.spinner(f'Extracting headers and building a mapping schema...'):
+                    try:
+                        # DuckDB can sniff headers insanely fast from massive files
+                        import duckdb
+                        s1_header = duckdb.query(f"SELECT * FROM read_csv_auto('{t1.name}') LIMIT 5").df()
+                        s2_header = duckdb.query(f"SELECT * FROM read_csv_auto('{t2.name}') LIMIT 5").df()
+                        
+                        agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
+                        st.session_state.ai_config = agent.suggest_configuration(s1_header.to_csv(index=False), s2_header.to_csv(index=False))
+                        st.session_state.heavy_files = (t1.name, t2.name)
+                        st.success("AI Schema Analysis Complete!")
+                    except Exception as e:
+                        st.error(f"Error during AI analysis: {str(e)}")
+                        
+        with c_upload:
+            template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"htpl_{st.session_state.uploader_key}", label_visibility="collapsed")
+            if template_file:
+                try:
+                    tpl_df = pd.read_csv(template_file)
+                    if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
+                        new_mappings = []
+                        for _, row in tpl_df.iterrows():
+                            c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
+                            c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
+                            rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
+                            if rule.lower() == 'nan': rule = ""
+                            if c1 and c2:
+                                new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
+                        
+                        st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=new_mappings, ignore_columns=[])
+                        st.session_state.heavy_files = (t1.name, t2.name)
+                        st.success("Template Loaded Successfully!")
+                    else:
+                        st.error("Invalid template format.")
+                except Exception as e:
+                    st.error(f"Failed to load template: {str(e)}")
+
+        # --- HEAVY GRID CONFIGURATOR ---
+        if st.session_state.ai_config and st.session_state.get('heavy_files'):
+            config = st.session_state.ai_config
+            f1_path, f2_path = st.session_state.heavy_files
+            
+            # Re-read headers for the dropdown options
+            import duckdb
+            f1_cols = [""] + duckdb.query(f"SELECT * FROM read_csv_auto('{f1_path}') LIMIT 1").df().columns.tolist()
+            f2_cols = [""] + duckdb.query(f"SELECT * FROM read_csv_auto('{f2_path}') LIMIT 1").df().columns.tolist()
+            
+            st.write("Review and adjust the AI's suggestions before running the final Heavy comparison:")
+            
+            st.markdown("**Primary Keys**")
+            pk_cols = st.multiselect("Select Primary Keys (File 1 Columns)", options=[x for x in f1_cols if x], default=config.primary_keys, key="h_pk")
+            
+            st.markdown("**Column Mappings**")
+            mapping_data = [{"File 1 Column": m.file1_column, "File 2 Column": m.file2_column, "Validation Rule (Optional)": m.validation_rule or ""} for m in config.column_mappings]
+            mapping_df = pd.DataFrame(mapping_data)
+
+            edited_mapping_df = st.data_editor(
+                mapping_df, num_rows="dynamic", use_container_width=True, key="h_editor",
+                column_config={
+                    "File 1 Column": st.column_config.SelectboxColumn("Source Column", options=f1_cols),
+                    "File 2 Column": st.column_config.SelectboxColumn("Target Column", options=f2_cols),
+                    "Validation Rule (Optional)": st.column_config.TextColumn("Validation Rule")
+                }
+            )
+            
+            # Export Template
+            st.download_button(
+                label="💾 Save As Mapping Template (CSV)",
+                data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
+                file_name="truealign_heavy_mapping_template.csv",
+                mime="text/csv",
+                key="h_download_tpl",
+                help="Download these mappings and rules to instantly load them next time"
+            )
+            
+            st.markdown("---")
+            if st.button("🚀 Run Heavy File Comparison (Disk Streaming)", type="primary", use_container_width=True, key="h_run"):
+                with st.spinner('Piping massive files to DuckDB analytic engine...'):
+                    new_mappings = []
+                    rules_dict = {}
+                    for index, row in edited_mapping_df.iterrows():
+                        c1, c2, rule = str(row.get('File 1 Column')), str(row.get('File 2 Column')), str(row.get('Validation Rule (Optional)'))
+                        if c1 and c2 and c1 != 'None' and c2 != 'None' and c1 != 'nan':
+                            new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule != 'nan' else None))
+                            if rule and rule != 'nan':
+                                rules_dict[c1] = rule
+                    
+                    final_config = ValidationConfig(primary_keys=pk_cols, column_mappings=new_mappings)
+                    
+                    from core.engines.duckdb_engine import DuckDBEngine
+                    heavy_engine = DuckDBEngine(final_config, rules_dict=rules_dict)
+                    
+                    try:
+                        st.session_state.results = heavy_engine.compare(f1_path, f2_path)
+                        st.toast('Massive Comparison Complete!', icon='🐘')
+                        
+                        # Clean up temp files
+                        os.unlink(f1_path)
+                        os.unlink(f2_path)
+                        st.session_state.heavy_files = None
+                    except Exception as e:
+                        st.error(f"DuckDB Query Failed: {str(e)}")
+                        
+            # Results UI
+            if 'results' in st.session_state:
+                res = st.session_state.results
+                total1, total2 = res.get('Total Rows File 1', 0), res.get('Total Rows File 2', 0)
+                mismatches = len(res.get('Data Mismatches', []))
+                
+                st.subheader("📊 Heavy Validation Results")
+                k1, k2, k3, k4, k5 = st.columns(5)
+                k1.metric("Total Rows (File 1)", f"{total1:,}")
+                k2.metric("Total Rows (File 2)", f"{total2:,}")
+                k3.metric("Exact Matches", f"{len(res.get('Exact Matches', [])):,}")
+                k4.metric("Missing Rows", f"{(len(res.get('Missing in File 1 (Found in 2)', [])) + len(res.get('Missing in File 2 (Found in 1)', []))):,}")
+                k5.metric("Data Mismatches", f"{mismatches:,}")
+                
+                t1, t2, t3, t4 = st.tabs(["📝 Mismatch Report", "❌ Missing in 1", "❌ Missing in 2", "✅ Exact Matches"])
+                with t1:
+                    if mismatches > 0: st.dataframe(pd.DataFrame(res.get('Mismatch Breakdown', [])), use_container_width=True)
+                    else: st.success("No heavy mismatches found!")
+                with t2: st.dataframe(res.get('Missing in File 1 (Found in 2)', pd.DataFrame()), use_container_width=True)
+                with t3: st.dataframe(res.get('Missing in File 2 (Found in 1)', pd.DataFrame()), use_container_width=True)
+                with t4: st.dataframe(res.get('Exact Matches', pd.DataFrame()), use_container_width=True)
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🔄 Start New Validation (Bottom)", use_container_width=True, key="h_reset"):
                     reset_app()
