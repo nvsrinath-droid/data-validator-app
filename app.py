@@ -113,9 +113,14 @@ if file1 and file2:
         # --- Step 3: Run Comparison ---
         if st.button("🚀 Run Full Data Comparison", type="primary", use_container_width=True):
             with st.spinner('Comparing all rows...'):
-                # Rebuild config object from the UI edited state
-                new_mappings = [ColumnMap(file1_column=row['File 1 Column'], file2_column=row['File 2 Column']) 
-                                for index, row in edited_mapping_df.iterrows()]
+                # Rebuild config object from the UI edited state, safely dropping empty/deleted rows
+                new_mappings = []
+                for index, row in edited_mapping_df.iterrows():
+                    c1 = str(row.get('File 1 Column', '')).strip()
+                    c2 = str(row.get('File 2 Column', '')).strip()
+                    # Only map if both columns are provided and not NaN
+                    if c1 and c2 and c1.lower() != 'nan' and c2.lower() != 'nan' and c1 != 'None' and c2 != 'None':
+                        new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2))
                 
                 final_config = ValidationConfig(
                     primary_keys=pk_cols,
@@ -125,58 +130,76 @@ if file1 and file2:
                 
                 # Execute Core Logic
                 comparator = DataComparator(final_config)
-                df1_full = conn1.read_data()
-                df2_full = conn2.read_data()
-                results = comparator.compare(df1_full, df2_full)
+                st.session_state.df1_full = conn1.read_data()
+                st.session_state.df2_full = conn2.read_data()
+                st.session_state.results = comparator.compare(st.session_state.df1_full, st.session_state.df2_full)
                 
                 st.toast('Comparison Complete!', icon='🎉')
                 
-                # --- Step 4: Display Results & Downloads ---
-                st.subheader("📊 Validation Results")
+        # --- Step 4: Display Results & Downloads ---
+        if st.session_state.get('results'):
+            results = st.session_state.results
+            df1_full = st.session_state.df1_full
+            df2_full = st.session_state.df2_full
+            
+            st.subheader("📊 Validation Results")
+            
+            # Feature: High Level Metric Summary
+            st.markdown("### Record Counts & Summary")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("File 1 Total Rows", f"{len(df1_full):,}")
+            m2.metric("File 2 Total Rows", f"{len(df2_full):,}")
+            
+            # Optional: Grand Totals for matching numeric columns
+            total_diff = len(df1_full) - len(df2_full)
+            m3.metric("Row Count Difference", f"{total_diff:,}", delta=total_diff, delta_color="inverse")
+            
+            st.markdown("---")
+            
+            st.markdown("### Detailed Exceptions")
+            # We need a helper to generate CSV strings for download
+            def to_csv_download(data_dict_list, is_mismatch=False):
+                if not data_dict_list: return None
                 
-                # We need a helper to generate CSV strings for download
-                def to_csv_download(data_dict_list, is_mismatch=False):
-                    if not data_dict_list: return None
-                    
-                    if is_mismatch:
-                         # Flatten mismatch structure
-                         flat_data = []
-                         for item in data_dict_list:
-                            pk_str = str(item["primary_keys"])
-                            for diff in item["differences"]:
-                                flat_data.append({
-                                    "Primary Key": pk_str,
-                                    "Column": diff["column"],
-                                    "File 1 Value": diff["file1_value"],
-                                    "File 2 Value": diff["file2_value"]
-                                })
-                         return pd.DataFrame(flat_data).to_csv(index=False).encode('utf-8')
-                    else:
-                         return pd.DataFrame(data_dict_list).to_csv(index=False).encode('utf-8')
+                if is_mismatch:
+                     # Flatten mismatch structure
+                     flat_data = []
+                     for item in data_dict_list:
+                        pk_str = str(item["primary_keys"])
+                        for diff in item["differences"]:
+                            flat_data.append({
+                                "Primary Key": pk_str,
+                                "Column": diff["column"],
+                                "File 1 Value": diff["file1_value"],
+                                "File 2 Value": diff["file2_value"]
+                            })
+                     return pd.DataFrame(flat_data).to_csv(index=False).encode('utf-8')
+                else:
+                     return pd.DataFrame(data_dict_list).to_csv(index=False).encode('utf-8')
 
-                # Create tabs for clean viewing
-                tab1, tab2, tab3 = st.tabs(["Mismatched Values", "Missing in Source", "Missing in External"])
-                
-                with tab1:
-                    mismatches = results.get('mismatches', [])
-                    st.metric("Total Mismatched Rows", len(mismatches))
-                    if mismatches:
-                        csv_data = to_csv_download(mismatches, is_mismatch=True)
-                        st.download_button("Download Mismatches CSV", data=csv_data, file_name="mismatches.csv", mime="text/csv")
-                        st.dataframe(pd.DataFrame(mismatches).astype(str)) # Easy viewer
-                
-                with tab2:
-                     missing_f1 = results.get('missing_in_file1', [])
-                     st.metric("Total Rows Missing in Source File", len(missing_f1))
-                     if missing_f1:
-                         csv_data = to_csv_download(missing_f1)
-                         st.download_button("Download Missing (Source) CSV", data=csv_data, file_name="missing_source.csv", mime="text/csv")
-                         st.dataframe(pd.DataFrame(missing_f1))
-                         
-                with tab3:
-                     missing_f2 = results.get('missing_in_file2', [])
-                     st.metric("Total Rows Missing in External File", len(missing_f2))
-                     if missing_f2:
-                         csv_data = to_csv_download(missing_f2)
-                         st.download_button("Download Missing (External) CSV", data=csv_data, file_name="missing_external.csv", mime="text/csv")
-                         st.dataframe(pd.DataFrame(missing_f2))
+            # Create tabs for clean viewing
+            tab1, tab2, tab3 = st.tabs(["Mismatched Values", "Missing in Source", "Missing in External"])
+            
+            with tab1:
+                mismatches = results.get('mismatches', [])
+                st.metric("Total Mismatched Rows", len(mismatches))
+                if mismatches:
+                    csv_data = to_csv_download(mismatches, is_mismatch=True)
+                    st.download_button("Download Mismatches CSV", data=csv_data, file_name="mismatches.csv", mime="text/csv")
+                    st.dataframe(pd.DataFrame(mismatches).astype(str)) # Easy viewer
+            
+            with tab2:
+                 missing_f1 = results.get('missing_in_file1', [])
+                 st.metric("Total Rows Missing in Source File", len(missing_f1))
+                 if missing_f1:
+                     csv_data = to_csv_download(missing_f1)
+                     st.download_button("Download Missing (Source) CSV", data=csv_data, file_name="missing_source.csv", mime="text/csv")
+                     st.dataframe(pd.DataFrame(missing_f1))
+                     
+            with tab3:
+                 missing_f2 = results.get('missing_in_file2', [])
+                 st.metric("Total Rows Missing in External File", len(missing_f2))
+                 if missing_f2:
+                     csv_data = to_csv_download(missing_f2)
+                     st.download_button("Download Missing (External) CSV", data=csv_data, file_name="missing_external.csv", mime="text/csv")
+                     st.dataframe(pd.DataFrame(missing_f2))
