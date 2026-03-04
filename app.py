@@ -195,19 +195,20 @@ if st.session_state.get('execution_tier') is None:
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.info("**🚀 Standard Engine**\n\nPerfect for daily ad-hoc tasks.\n\n- Powered by Pandas (In-Memory RAM)\n- Upload Excel & CSV files up to ~200MB\n- Run DB Queries up to ~500k rows")
-        if st.button("Launch Standard Engine", use_container_width=True):
+        st.info("**🚀 Daily Ad-Hoc Checkups**\n\nPerfect for standard daily tasks.\n\n- Fast In-Memory Processing\n- Upload Excel & CSV files up to ~200MB\n- Run DB Queries up to ~500k rows")
+        if st.button("Launch Ad-Hoc Engine", use_container_width=True):
             st.session_state.execution_tier = "standard"
             st.rerun()
             
     with c2:
-        st.warning("**🏢 Heavy File Engine** (In Development)\n\nFor massive flat-file datasets.\n\n- Powered by local DuckDB\n- Avoids RAM bottlenecks completely\n- Parses local Gigabyte flat files")
-        if st.button("Launch Heavy Engine", disabled=True, use_container_width=True, help="Coming soon from your AI developer"):
-            pass
+        st.warning("**🏢 Massive Log Files**\n\nFor massive flat-file datasets.\n\n- Advanced Disk Streaming Engine\n- Avoids memory bottlenecks completely\n- Parses local Gigabyte flat files")
+        if st.button("Launch Massive File Engine", use_container_width=True):
+            st.session_state.execution_tier = "heavy"
+            st.rerun()
             
     with c3:
-        st.error("**🌐 DB Pushdown Engine**\n\nFor enterprise SQL data warehouses.\n\n- Zero data downloading required\n- Translates AI rules to native SQL\n- Infinite database scale")
-        if st.button("Launch Pushdown Engine", use_container_width=True):
+        st.error("**🌐 Enterprise SQL Warehouses**\n\nFor enterprise SQL data warehouses.\n\n- Zero data downloading required\n- Translates AI rules natively\n- Infinite database scale")
+        if st.button("Launch Enterprise SQL Engine", use_container_width=True):
             st.session_state.execution_tier = "pushdown"
             st.rerun()
             
@@ -215,7 +216,7 @@ if st.session_state.get('execution_tier') is None:
 
 
 if st.session_state.execution_tier == "standard":
-    st.markdown(f"**🟢 Active Engine:** Standard (Pandas In-Memory)")
+    st.markdown(f"**🟢 Active Engine:** Daily Ad-Hoc Checkups")
     
     # Step 1: Data Sources Selection
     col1, col2 = st.columns(2)
@@ -494,7 +495,7 @@ if st.session_state.execution_tier == "standard":
             reset_app()
 
 elif st.session_state.execution_tier == "heavy":
-    st.markdown(f"**🟢 Active Engine:** Heavy File Engine (DuckDB Disk Streaming)")
+    st.markdown(f"**🟢 Active Engine:** Massive Log Files")
     
     # Step 1: Data Sources Selection (Files Only for Heavy Engine)
     col1, col2 = st.columns(2)
@@ -671,7 +672,7 @@ elif st.session_state.execution_tier == "heavy":
                     reset_app()
 
 elif st.session_state.execution_tier == "pushdown":
-    st.markdown(f"**🟢 Active Engine:** Live DB Pushdown Engine (Zero Download)")
+    st.markdown(f"**🟢 Active Engine:** Enterprise SQL Warehouses")
     
     st.subheader("🏢 Enterprise Database Connection")
     st.markdown("Enter your database credentials to execute validation natively.")
