@@ -444,7 +444,7 @@ if not st.session_state.user and not st.session_state.is_guest:
         st.subheader("Login to Your Account")
         with st.form("login_form"):
             email_login = st.text_input("Email")
-            pass_login = st.text_input("Password", type="password")
+            pass_login = st.text_input("Password (case sensitive)", type="password")
             if st.form_submit_button("Log In", type="primary", use_container_width=True):
                 if auth.authenticate_user(email_login, pass_login):
                     st.session_state.user = email_login
@@ -464,7 +464,7 @@ if not st.session_state.user and not st.session_state.is_guest:
         st.info("Registered users can securely save their AI mapping templates for future pipelines.")
         with st.form("register_form", clear_on_submit=True):
             email_reg = st.text_input("Email")
-            pass_reg = st.text_input("Password", type="password")
+            pass_reg = st.text_input("Password (case sensitive)", type="password")
             if st.form_submit_button("Register", type="primary", use_container_width=True):
                 if email_reg and pass_reg:
                     if auth.register_user(email_reg, pass_reg):
