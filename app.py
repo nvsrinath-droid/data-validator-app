@@ -1197,13 +1197,42 @@ elif st.session_state.execution_tier == "heavy":
                 k4.metric("Missing Rows", f"{(len(res.get('Missing in File 1 (Found in 2)', [])) + len(res.get('Missing in File 2 (Found in 1)', []))):,}")
                 k5.metric("Data Mismatches", f"{mismatches:,}")
                 
-                t1, t2, t3, t4 = st.tabs(["📝 Mismatch Report", "❌ Missing in 1", "❌ Missing in 2", "✅ Exact Matches"])
+                import io
+                def to_excel_download(df, sheet_name="Data"):
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    return buffer.getvalue()
+
+                def render_downloads(df, base_name, key_prefix):
+                    if type(df) == list: df = pd.DataFrame(df)
+                    if df is None or df.empty: return
+                    c1, c2 = st.columns(2)
+                    c1.download_button(f"📥 Download {base_name} (CSV)", df.to_csv(index=False), file_name=f"{base_name}.csv", mime="text/csv", key=f"{key_prefix}_csv", use_container_width=True)
+                    c2.download_button(f"📊 Download {base_name} (Excel)", to_excel_download(df, base_name), file_name=f"{base_name}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"{key_prefix}_xl", use_container_width=True)
+
+                t1, t2, t3, t4 = st.tabs(["📝 Mismatch Report", "❌ Missing in File 1", "❌ Missing in File 2", "✅ Exact Matches"])
                 with t1:
-                    if mismatches > 0: st.dataframe(pd.DataFrame(res.get('Mismatch Breakdown', [])), use_container_width=True)
-                    else: st.success("No heavy mismatches found!")
-                with t2: st.dataframe(res.get('Missing in File 1 (Found in 2)', pd.DataFrame()), use_container_width=True)
-                with t3: st.dataframe(res.get('Missing in File 2 (Found in 1)', pd.DataFrame()), use_container_width=True)
-                with t4: st.dataframe(res.get('Exact Matches', pd.DataFrame()), use_container_width=True)
+                    st.markdown("### Missing Attributes and Differences")
+                    if mismatches > 0: 
+                        st.dataframe(pd.DataFrame(res.get('Mismatch Breakdown', [])), use_container_width=True)
+                        render_downloads(res.get('Mismatch Breakdown', []), "Mismatch_Report", "h_t1")
+                    else: st.success("No data mismatches found!")
+                    
+                with t2: 
+                    st.markdown("### Rows missing in Target mapped system")
+                    st.dataframe(res.get('Missing in File 1 (Found in 2)', pd.DataFrame()), use_container_width=True)
+                    render_downloads(res.get('Missing in File 1 (Found in 2)', pd.DataFrame()), "Missing_in_Target", "h_t2")
+                    
+                with t3: 
+                    st.markdown("### Extra/Orphaned rows present in Target system")
+                    st.dataframe(res.get('Missing in File 2 (Found in 1)', pd.DataFrame()), use_container_width=True)
+                    render_downloads(res.get('Missing in File 2 (Found in 1)', pd.DataFrame()), "Missing_in_Source", "h_t3")
+                    
+                with t4: 
+                    st.markdown("### Exact Validated Matches")
+                    st.dataframe(res.get('Exact Matches', pd.DataFrame()), use_container_width=True)
+                    render_downloads(res.get('Exact Matches', pd.DataFrame()), "Exact_Matches", "h_t4")
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("🔄 Restart Validation", use_container_width=True, key="h_reset"):
