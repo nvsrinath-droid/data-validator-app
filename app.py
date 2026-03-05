@@ -972,8 +972,10 @@ elif st.session_state.execution_tier == "heavy":
             st.markdown("---")
             if not os.path.exists(source_1_path):
                 st.error(f"❌ Source path not found on your local disk: `{source_1_path}`")
+                st.error(f"Debug Raw Source 1 String: {repr(source_1_path)}")
             if not os.path.exists(source_2_path):
                 st.error(f"❌ Target path not found on your local disk: `{source_2_path}`")
+                st.error(f"Debug Raw Target 2 String: {repr(source_2_path)}")
             st.stop()
             
         t1_name = source_1_path
@@ -1007,15 +1009,14 @@ elif st.session_state.execution_tier == "heavy":
                         if not t1_name or not t2_name:
                             st.error("Please enter valid file paths in Step 1 first.")
                         else:
-                            # DuckDB requires the spatial extension to read Excel natively
-                            import duckdb
-                            duckdb.execute("INSTALL spatial; LOAD spatial;")
+                            def get_headers_df(path: str, n: int = 5) -> pd.DataFrame:
+                                if path.lower().endswith(('.xls', '.xlsx')):
+                                    return pd.read_excel(path, nrows=n)
+                                else:
+                                    return pd.read_csv(path, nrows=n)
                             
-                            def get_duck_read(path: str) -> str:
-                                return f"st_read('{path}')" if path.lower().endswith(('.xls', '.xlsx')) else f"read_csv_auto('{path}')"
-                            
-                            s1_header = duckdb.query(f"SELECT * FROM {get_duck_read(t1_name)} LIMIT 5").df()
-                            s2_header = duckdb.query(f"SELECT * FROM {get_duck_read(t2_name)} LIMIT 5").df()
+                            s1_header = get_headers_df(t1_name)
+                            s2_header = get_headers_df(t2_name)
                             
                             agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
                             st.session_state.ai_config = agent.suggest_configuration(s1_header.to_csv(index=False), s2_header.to_csv(index=False))
@@ -1073,13 +1074,15 @@ elif st.session_state.execution_tier == "heavy":
                 if not t1_name or not t2_name:
                     st.error("Please enter valid file paths in Step 1 first.")
                 else:
-                    import duckdb
-                    duckdb.execute("INSTALL spatial; LOAD spatial;")
-                    def get_duck_read(path: str) -> str:
-                        return f"st_read('{path}')" if path.lower().endswith(('.xls', '.xlsx')) else f"read_csv_auto('{path}')"
+                    def get_headers_df(path: str, n: int = 1) -> pd.DataFrame:
+                        if path.lower().endswith(('.xls', '.xlsx')):
+                            return pd.read_excel(path, nrows=n)
+                        else:
+                            return pd.read_csv(path, nrows=n)
+                    
                     # Pre-fill an empty config with the columns layout
-                    f1_cols = duckdb.query(f"SELECT * FROM {get_duck_read(t1_name)} LIMIT 1").df().columns.tolist()
-                    f2_cols = duckdb.query(f"SELECT * FROM {get_duck_read(t2_name)} LIMIT 1").df().columns.tolist()
+                    f1_cols = get_headers_df(t1_name, 1).columns.tolist()
+                    f2_cols = get_headers_df(t2_name, 1).columns.tolist()
                     empty_mappings = [ColumnMap(file1_column=str(c1), file2_column=str(c2) if c2 in f2_cols else None) for c1, c2 in zip(f1_cols, f2_cols)]
                     st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=empty_mappings, ignore_columns=[])
                     st.session_state.heavy_files = (t1_name, t2_name)
