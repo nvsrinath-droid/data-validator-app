@@ -3,6 +3,7 @@ import pandas as pd
 import json
 import base64
 import os
+import io
 from dotenv import load_dotenv
 
 # App layout and styling must be set first
@@ -643,9 +644,10 @@ if st.session_state.execution_tier == "standard":
             st.stop()
     
         # UI for choosing between AI Generation or Loading a Template
-        c_generate, c_upload = st.columns(2)
+        tab_ai, tab_template = st.tabs(["✨ Auto-Map with AI", "📥 Load Saved Template"])
     
-        with c_generate:
+        with tab_ai:
+            st.markdown("<div style='margin-bottom: 10px; color: #cbd5e1;'>Let our AI automatically analyze the selected files and resolve schema differences.</div>", unsafe_allow_html=True)
             # Generate Config Button
             if st.button(f"✨ Auto-Map with {selected_model_display}", type="primary", use_container_width=True):
                 with st.spinner(f'{selected_model_display} is reading your structured data and building a mapping schema...'):
@@ -655,35 +657,52 @@ if st.session_state.execution_tier == "standard":
                     
                         agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
                         st.session_state.ai_config = agent.suggest_configuration(sample1, sample2)
+                        st.session_state.is_template_loaded = False
                         st.success("AI Analysis Complete!")
                     except Exception as e:
                         st.error(f"Error during AI analysis: {str(e)}")
                     
-        with c_upload:
+        with tab_template:
             if not st.session_state.is_guest:
-                template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"tpl_{st.session_state.uploader_key}", label_visibility="collapsed")
+                st.markdown("<div style='margin-bottom: 10px; color: #cbd5e1;'>Bypass the AI and instantly load a previously saved configuration file.</div>", unsafe_allow_html=True)
+                template_file = st.file_uploader("Upload Formatting Template", type=["csv", "xlsx"], key=f"tpl_{st.session_state.uploader_key}", label_visibility="collapsed")
                 if template_file:
                     try:
-                        tpl_df = pd.read_csv(template_file)
-                        # Ensure the CSV has the expected columns
+                        if template_file.name.endswith(".xlsx"):
+                            tpl_df = pd.read_excel(template_file)
+                        else:
+                            tpl_df = pd.read_csv(template_file)
+                        
+                        # Ensure the template has the expected columns
                         if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
                             new_mappings = []
+                            loaded_pks = []
+                            
                             for _, row in tpl_df.iterrows():
                                 c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
                                 c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
                                 rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
                                 if rule.lower() == 'nan': rule = ""
+                                
+                                is_pk = False
+                                if "Is Primary Key" in tpl_df.columns:
+                                    pk_val = row["Is Primary Key"]
+                                    if pd.notna(pk_val) and str(pk_val).lower() in ['true', '1', 'yes', 't']:
+                                        is_pk = True
                             
                                 if c1 and c2:
                                     new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
+                                    if is_pk:
+                                        loaded_pks.append(c1)
                         
                             # Store it directly into session state bypassing the AI
                             st.session_state.ai_config = ValidationConfig(
-                                primary_keys=[], # Primary keys will be manually selected by user next
+                                primary_keys=loaded_pks,
                                 column_mappings=new_mappings,
                                 ignore_columns=[]
                             )
-                            st.success("Template Loaded Successfully!")
+                            st.session_state.is_template_loaded = True
+                            st.success("Template Loaded Successfully! Primary Keys and Mappings restored.")
                         else:
                             st.error("Invalid template format. Must contain 'File 1 Column', 'File 2 Column', and 'Validation Rule (Optional)'.")
                     except Exception as e:
@@ -696,7 +715,10 @@ if st.session_state.execution_tier == "standard":
             config = st.session_state.ai_config
         
             # UI for editing mappings
-            st.write("Review and adjust the AI's suggestions before running the final comparison:")
+            if st.session_state.get("is_template_loaded", False):
+                st.write("Review your loaded Template mappings before running the final comparison:")
+            else:
+                st.write("Review and adjust the AI's suggestions before running the final comparison:")
         
             # Primary Keys UI
             st.markdown("**Primary Keys** (The unique identifier to link rows together)")
@@ -737,15 +759,23 @@ if st.session_state.execution_tier == "standard":
                     )
                 }
             )
-        
             # Export Template Button
             if not st.session_state.is_guest:
+                # Add Primary Key indicators to the exported data
+                export_df = edited_mapping_df.copy()
+                export_df["Is Primary Key"] = export_df["File 1 Column"].apply(lambda x: True if x in pk_cols else False)
+                
+                # Write to BytesIO buffer for Excel download
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    export_df.to_excel(writer, index=False, sheet_name='Mappings')
+                
                 st.download_button(
-                    label="💾 Save As Mapping Template (CSV)",
-                    data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
-                    file_name="truealign_mapping_template.csv",
-                    mime="text/csv",
-                    help="Download these mappings and rules to instantly load them next time"
+                    label="💾 Save As Mapping Template (Excel)",
+                    data=buffer.getvalue(),
+                    file_name="truealign_mapping_template.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    help="Download these mappings and primary keys to instantly load them next time"
                 )
         
             st.markdown("---")
@@ -906,9 +936,10 @@ elif st.session_state.execution_tier == "heavy":
              st.stop()
              
         # UI for choosing AI Mapping Generation vs Uploading a Heavy Template
-        c_generate, c_upload = st.columns(2)
+        tab_ai, tab_template = st.tabs(["✨ Auto-Map Header Rows with AI", "📥 Load Saved Template"])
         
-        with c_generate:
+        with tab_ai:
+            st.markdown("<div style='margin-bottom: 10px; color: #cbd5e1;'>Let our AI automatically analyze the selected files and resolve schema differences.</div>", unsafe_allow_html=True)
             if st.button(f"✨ Auto-Map Header Rows with {selected_model_display}", type="primary", use_container_width=True, key="h_analyze"):
                 with st.spinner(f'Extracting headers and building a mapping schema...'):
                     try:
@@ -920,31 +951,48 @@ elif st.session_state.execution_tier == "heavy":
                         agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
                         st.session_state.ai_config = agent.suggest_configuration(s1_header.to_csv(index=False), s2_header.to_csv(index=False))
                         st.session_state.heavy_files = (t1_name, t2_name)
+                        st.session_state.is_h_template_loaded = False
                         st.success("AI Schema Analysis Complete!")
                     except Exception as e:
                         st.error(f"Error during AI analysis: {str(e)}")
                         
-        with c_upload:
+        with tab_template:
             if not st.session_state.is_guest:
-                template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"htpl_{st.session_state.uploader_key}", label_visibility="collapsed")
+                st.markdown("<div style='margin-bottom: 10px; color: #cbd5e1;'>Bypass the AI and instantly load a previously saved configuration file.</div>", unsafe_allow_html=True)
+                template_file = st.file_uploader("Upload Formatting Template", type=["csv", "xlsx"], key=f"htpl_{st.session_state.uploader_key}", label_visibility="collapsed")
                 if template_file:
                     try:
-                        tpl_df = pd.read_csv(template_file)
+                        if template_file.name.endswith(".xlsx"):
+                            tpl_df = pd.read_excel(template_file)
+                        else:
+                            tpl_df = pd.read_csv(template_file)
+                            
                         if all(c in tpl_df.columns for c in ["File 1 Column", "File 2 Column", "Validation Rule (Optional)"]):
                             new_mappings = []
+                            loaded_pks = []
                             for _, row in tpl_df.iterrows():
                                 c1 = str(row["File 1 Column"]) if pd.notna(row["File 1 Column"]) else ""
                                 c2 = str(row["File 2 Column"]) if pd.notna(row["File 2 Column"]) else ""
                                 rule = str(row["Validation Rule (Optional)"]) if pd.notna(row["Validation Rule (Optional)"]) else ""
                                 if rule.lower() == 'nan': rule = ""
+                                
+                                is_pk = False
+                                if "Is Primary Key" in tpl_df.columns:
+                                    pk_val = row["Is Primary Key"]
+                                    if pd.notna(pk_val) and str(pk_val).lower() in ['true', '1', 'yes', 't']:
+                                        is_pk = True
+                                        
                                 if c1 and c2:
                                     new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
+                                    if is_pk:
+                                        loaded_pks.append(c1)
                             
-                            st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=new_mappings, ignore_columns=[])
+                            st.session_state.ai_config = ValidationConfig(primary_keys=loaded_pks, column_mappings=new_mappings, ignore_columns=[])
                             st.session_state.heavy_files = (t1_name, t2_name)
-                            st.success("Template Loaded Successfully!")
+                            st.session_state.is_h_template_loaded = True
+                            st.success("Template Loaded Successfully! Primary Keys and Mappings restored.")
                         else:
-                            st.error("Invalid template format.")
+                            st.error("Invalid template format. Must contain 'File 1 Column', 'File 2 Column', and 'Validation Rule (Optional)'.")
                     except Exception as e:
                         st.error(f"Failed to load template: {str(e)}")
             else:
@@ -960,7 +1008,10 @@ elif st.session_state.execution_tier == "heavy":
             f1_cols = [""] + duckdb.query(f"SELECT * FROM read_csv_auto('{f1_path}') LIMIT 1").df().columns.tolist()
             f2_cols = [""] + duckdb.query(f"SELECT * FROM read_csv_auto('{f2_path}') LIMIT 1").df().columns.tolist()
             
-            st.write("Review and adjust the AI's suggestions before running the final Heavy comparison:")
+            if st.session_state.get("is_h_template_loaded", False):
+                st.write("Review your loaded Template mappings before running the final Heavy comparison:")
+            else:
+                st.write("Review and adjust the AI's suggestions before running the final Heavy comparison:")
             
             st.markdown("**Primary Keys**")
             pk_cols = st.multiselect("Select Primary Keys (File 1 Columns)", options=[x for x in f1_cols if x], default=config.primary_keys, key="h_pk")
@@ -980,13 +1031,23 @@ elif st.session_state.execution_tier == "heavy":
             
             # Export Template
             if not st.session_state.is_guest:
+                # Add Primary Key indicators to the exported data
+                export_df = edited_mapping_df.copy()
+                export_df["Is Primary Key"] = export_df["File 1 Column"].apply(lambda x: True if x in pk_cols else False)
+                
+                # Write to BytesIO buffer for Excel download
+                import io
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    export_df.to_excel(writer, index=False, sheet_name='Mappings')
+                    
                 st.download_button(
-                    label="💾 Save As Mapping Template (CSV)",
-                    data=edited_mapping_df.to_csv(index=False).encode('utf-8'),
-                    file_name="truealign_heavy_mapping_template.csv",
-                    mime="text/csv",
+                    label="💾 Save As Mapping Template (Excel)",
+                    data=buffer.getvalue(),
+                    file_name="truealign_heavy_mapping_template.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="h_download_tpl",
-                    help="Download these mappings and rules to instantly load them next time"
+                    help="Download these mappings and primary keys to instantly load them next time"
                 )
             
             st.markdown("---")
