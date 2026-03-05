@@ -46,9 +46,18 @@ class DuckDBEngine:
         """
         conn = duckdb.connect(database=':memory:')
         
-        # 1. Register the files as tables
-        conn.execute(f"CREATE TABLE file1 AS SELECT * FROM read_csv_auto('{file1_path}')")
-        conn.execute(f"CREATE TABLE file2 AS SELECT * FROM read_csv_auto('{file2_path}')")
+        # Install the spatial extension to natively read Excel files
+        conn.execute("INSTALL spatial;")
+        conn.execute("LOAD spatial;")
+        
+        # 1. Register the files as tables dynamically based on extension
+        def get_duck_read_cmd(path: str) -> str:
+            if path.lower().endswith(('.xls', '.xlsx')):
+                return f"st_read('{path}')"
+            return f"read_csv_auto('{path}')"
+            
+        conn.execute(f"CREATE TABLE file1 AS SELECT * FROM {get_duck_read_cmd(file1_path)}")
+        conn.execute(f"CREATE TABLE file2 AS SELECT * FROM {get_duck_read_cmd(file2_path)}")
         
         # 2. Build the JOIN condition from Primary Keys
         join_conditions = []

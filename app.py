@@ -973,10 +973,15 @@ elif st.session_state.execution_tier == "heavy":
             if st.button(f"✨ Auto-Map Header Rows with {selected_model_display}", type="primary", use_container_width=True, key="h_analyze"):
                 with st.spinner(f'Extracting headers and building a mapping schema...'):
                     try:
-                        # DuckDB can sniff headers insanely fast from massive files
+                        # DuckDB requires the spatial extension to read Excel natively
                         import duckdb
-                        s1_header = duckdb.query(f"SELECT * FROM read_csv_auto('{t1_name}') LIMIT 5").df()
-                        s2_header = duckdb.query(f"SELECT * FROM read_csv_auto('{t2_name}') LIMIT 5").df()
+                        duckdb.execute("INSTALL spatial; LOAD spatial;")
+                        
+                        def get_duck_read(path: str) -> str:
+                            return f"st_read('{path}')" if path.lower().endswith(('.xls', '.xlsx')) else f"read_csv_auto('{path}')"
+                        
+                        s1_header = duckdb.query(f"SELECT * FROM {get_duck_read(t1_name)} LIMIT 5").df()
+                        s2_header = duckdb.query(f"SELECT * FROM {get_duck_read(t2_name)} LIMIT 5").df()
                         
                         agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
                         st.session_state.ai_config = agent.suggest_configuration(s1_header.to_csv(index=False), s2_header.to_csv(index=False))
@@ -1035,8 +1040,12 @@ elif st.session_state.execution_tier == "heavy":
             
             # Re-read headers for the dropdown options
             import duckdb
-            f1_cols = [""] + duckdb.query(f"SELECT * FROM read_csv_auto('{f1_path}') LIMIT 1").df().columns.tolist()
-            f2_cols = [""] + duckdb.query(f"SELECT * FROM read_csv_auto('{f2_path}') LIMIT 1").df().columns.tolist()
+            duckdb.execute("INSTALL spatial; LOAD spatial;")
+            def get_duck_read(path: str) -> str:
+                return f"st_read('{path}')" if path.lower().endswith(('.xls', '.xlsx')) else f"read_csv_auto('{path}')"
+                
+            f1_cols = [""] + duckdb.query(f"SELECT * FROM {get_duck_read(f1_path)} LIMIT 1").df().columns.tolist()
+            f2_cols = [""] + duckdb.query(f"SELECT * FROM {get_duck_read(f2_path)} LIMIT 1").df().columns.tolist()
             
             if st.session_state.get("is_h_template_loaded", False):
                 st.write("Review your loaded Template mappings before running the final Heavy comparison:")
