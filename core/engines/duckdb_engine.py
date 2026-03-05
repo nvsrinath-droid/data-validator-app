@@ -59,15 +59,19 @@ class DuckDBEngine:
         conn.execute(f"CREATE TABLE file1 AS SELECT * FROM {get_duck_read_cmd(file1_path)}")
         conn.execute(f"CREATE TABLE file2 AS SELECT * FROM {get_duck_read_cmd(file2_path)}")
         
-        # 2. Build the JOIN condition from Primary Keys
+        # Create a lookup mapping for target column names
+        col_map = {m.file1_column: m.file2_column for m in self.config.column_mappings}
+        
+        # 2. Build the JOIN condition from Primary Keys, ensuring we use mapped f2 columns
         join_conditions = []
         for pk in self.config.primary_keys:
-            join_conditions.append(f"f1.\"{pk}\" = f2.\"{pk}\"")
+            mapped_pk = col_map.get(pk, pk)
+            join_conditions.append(f"f1.\"{pk}\" = f2.\"{mapped_pk}\"")
         join_clause = " AND ".join(join_conditions)
         
         # 3. Build the Validation Conditions (Exact Match OR AI Rule Match)
         validation_checks = []
-        select_cols = [f"COALESCE(f1.\"{pk}\", f2.\"{pk}\") AS \"{pk}\"" for pk in self.config.primary_keys]
+        select_cols = [f"COALESCE(f1.\"{pk}\", f2.\"{col_map.get(pk, pk)}\") AS \"{pk}\"" for pk in self.config.primary_keys]
         
         for mapping in self.config.column_mappings:
             c1 = mapping.file1_column
