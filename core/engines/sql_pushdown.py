@@ -14,14 +14,14 @@ class SQLPushdownEngine:
         self.config = config
         self.rules_dict = rules_dict or {}
 
-    def _translate_rule_to_sql(self, column: str, rule: str) -> str:
+    def _translate_rule_to_sql(self, c1_col: str, c2_col: str, rule: str) -> str:
         """
         Translates plain-English rules into native SQL conditions.
         Uses simplistic pattern matching for rapid fallback.
         """
         rule_lower = rule.lower()
-        col1 = f"f1.\"{column}\""
-        col2 = f"f2.\"{column}\""
+        col1 = f"f1.\"{c1_col}\""
+        col2 = f"f2.\"{c2_col}\""
         
         if "tolerance" in rule_lower or "+/-" in rule_lower or "within" in rule_lower:
             numbers = [int(s) for s in rule_lower.replace('$', '').replace('%', '').split() if s.isdigit()]
@@ -67,7 +67,7 @@ class SQLPushdownEngine:
             rule = mapping.validation_rule or self.rules_dict.get(c1)
                 
             if rule:
-                sql_condition = self._translate_rule_to_sql(c1, rule)
+                sql_condition = self._translate_rule_to_sql(c1, c2, rule)
                 select_cols.append(f"CASE WHEN {sql_condition} THEN 1 ELSE 0 END AS \"{c1}_IsValid\"")
             else:
                 select_cols.append(f"CASE WHEN CAST(f1.\"{c1}\" AS VARCHAR) = CAST(f2.\"{c2}\" AS VARCHAR) THEN 1 ELSE 0 END AS \"{c1}_IsValid\"")

@@ -14,15 +14,15 @@ class DuckDBEngine:
         self.config = config
         self.rules_dict = rules_dict or {}
 
-    def _translate_rule_to_sql(self, column: str, rule: str) -> str:
+    def _translate_rule_to_sql(self, c1_col: str, c2_col: str, rule: str) -> str:
         """
         Translates a plain-English rule into a SQL condition for DuckDB.
         WARNING: This is a simplictic static parser for rapid fallback. 
         In Phase 6, we will route this to litellm to generate complex SQL snippets.
         """
         rule_lower = rule.lower()
-        col1 = f"f1.\"{column}\""
-        col2 = f"f2.\"{column}\""
+        col1 = f"f1.\"{c1_col}\""
+        col2 = f"f2.\"{c2_col}\""
         
         if "tolerance" in rule_lower or "+/-" in rule_lower or "within" in rule_lower:
             # Extract numbers blindly for simple tolerance
@@ -89,7 +89,7 @@ class DuckDBEngine:
                 rule = self.rules_dict.get(c1)
                 
             if rule:
-                sql_condition = self._translate_rule_to_sql(c1, rule)
+                sql_condition = self._translate_rule_to_sql(c1, c2, rule)
                 # Output a 'Pass/Fail' boolean column for the UI to read
                 select_cols.append(f"CASE WHEN {sql_condition} THEN TRUE ELSE FALSE END AS \"{c1}_IsValid\"")
             else:
