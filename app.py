@@ -953,33 +953,46 @@ if st.session_state.execution_tier == "standard":
 elif st.session_state.execution_tier == "heavy":
     st.markdown(f"**🟢 Active Engine:** Massive Data Files")
     
-    # Step 1: Data Sources Selection (Direct Disk Access for Maximum Efficiency)
+    st.markdown("For Massive Data, you can either provide a local file path (if running the server locally) OR upload the file.")
     col1, col2 = st.columns(2)
+    
+    import os
+    import tempfile
+    
+    t1_name, t2_name = None, None
+    
     with col1:
         st.subheader("📁 Source Data (System of Record)")
-        source_1_path = st.text_input("Local File Path 1 (e.g. C:/data/source.csv or .xlsx)", key=f"hfile1_{st.session_state.uploader_key}")
+        source_1_upload = st.file_uploader("Upload Source File", type=["csv", "xlsx", "xls"], key=f"hup1_{st.session_state.uploader_key}")
+        source_1_path = st.text_input("OR: Local File Path 1 (if running locally)", key=f"hfile1_{st.session_state.uploader_key}")
 
     with col2:
         st.subheader("📄 Target Data (To Compare)")
-        source_2_path = st.text_input("Local File Path 2 (e.g. C:/data/target.csv or .xlsx)", key=f"hfile2_{st.session_state.uploader_key}")
+        source_2_upload = st.file_uploader("Upload Target File", type=["csv", "xlsx", "xls"], key=f"hup2_{st.session_state.uploader_key}")
+        source_2_path = st.text_input("OR: Local File Path 2 (if running locally)", key=f"hfile2_{st.session_state.uploader_key}")
 
-    import os
-    if source_1_path and source_2_path:
-        source_1_path = os.path.normpath(source_1_path.strip('\"\'\u202a\u202c '))
-        source_2_path = os.path.normpath(source_2_path.strip('\"\'\u202a\u202c '))
+    def process_heavy_input(upload, path, prefix):
+        if upload:
+            temp_dir = tempfile.gettempdir()
+            temp_path = os.path.join(temp_dir, f"{prefix}_{upload.name}")
+            with open(temp_path, "wb") as f:
+                f.write(upload.getbuffer())
+            return temp_path
+        elif path:
+            norm_path = os.path.normpath(path.strip('\"\'\u202a\u202c '))
+            if os.path.exists(norm_path):
+                return norm_path
+            else:
+                st.error(f"❌ Server path not found: `{norm_path}`")
+                return None
+        return None
+
+    if (source_1_upload or source_1_path) and (source_2_upload or source_2_path):
+        t1_name = process_heavy_input(source_1_upload, source_1_path, "heavy1")
+        t2_name = process_heavy_input(source_2_upload, source_2_path, "heavy2")
         
-        if not os.path.exists(source_1_path) or not os.path.exists(source_2_path):
-            st.markdown("---")
-            if not os.path.exists(source_1_path):
-                st.error(f"❌ Source path not found on your local disk: `{source_1_path}`")
-                st.error(f"Debug Raw Source 1 String: {repr(source_1_path)}")
-            if not os.path.exists(source_2_path):
-                st.error(f"❌ Target path not found on your local disk: `{source_2_path}`")
-                st.error(f"Debug Raw Target 2 String: {repr(source_2_path)}")
+        if not t1_name or not t2_name:
             st.stop()
-            
-        t1_name = source_1_path
-        t2_name = source_2_path
             
         st.markdown("---")
         st.subheader("🧠 Step 2: Select AI Model & Map Schema")
