@@ -1148,14 +1148,14 @@ elif st.session_state.execution_tier == "heavy":
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                     export_df.to_excel(writer, index=False, sheet_name='Mappings')
-                    
+                
                 st.download_button(
                     label="💾 Save As Mapping Template (Excel)",
                     data=buffer.getvalue(),
-                    file_name="truealign_heavy_mapping_template.xlsx",
+                    file_name="heavy_mapping_template.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="h_download_tpl",
-                    help="Download these mappings and primary keys to instantly load them next time"
+                    help="Save your massive data schema mappings for reuse later",
+                    key="heavy_tpl_dl"
                 )
             
             st.markdown("---")
