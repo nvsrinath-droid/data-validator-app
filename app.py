@@ -938,11 +938,11 @@ elif st.session_state.execution_tier == "heavy":
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("📁 Source Data (System of Record)")
-        source_1_path = st.text_input("Local File Path 1 (e.g. C:/data/source.csv)", key=f"hfile1_{st.session_state.uploader_key}")
+        source_1_path = st.text_input("Local File Path 1 (e.g. C:/data/source.csv or .xlsx)", key=f"hfile1_{st.session_state.uploader_key}")
 
     with col2:
         st.subheader("📄 Target Data (To Compare)")
-        source_2_path = st.text_input("Local File Path 2 (e.g. C:/data/target.csv)", key=f"hfile2_{st.session_state.uploader_key}")
+        source_2_path = st.text_input("Local File Path 2 (e.g. C:/data/target.csv or .xlsx)", key=f"hfile2_{st.session_state.uploader_key}")
 
     import os
     if source_1_path and source_2_path and os.path.exists(source_1_path) and os.path.exists(source_2_path):
