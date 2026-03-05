@@ -965,8 +965,8 @@ elif st.session_state.execution_tier == "heavy":
 
     import os
     if source_1_path and source_2_path:
-        source_1_path = source_1_path.strip('\"\'')
-        source_2_path = source_2_path.strip('\"\'')
+        source_1_path = os.path.normpath(source_1_path.strip('\"\'\u202a\u202c '))
+        source_2_path = os.path.normpath(source_2_path.strip('\"\'\u202a\u202c '))
         
         if not os.path.exists(source_1_path) or not os.path.exists(source_2_path):
             st.markdown("---")
