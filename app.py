@@ -302,6 +302,10 @@ if 'stored_keys' not in st.session_state:
 # Initialize Session State for user's selected models
 if 'user_configured_models' not in st.session_state:
     st.session_state.user_configured_models = []
+    # Auto-add default models if global environment variables are present
+    if os.environ.get("GEMINI_API_KEY"): st.session_state.user_configured_models.append("Google Gemini 2.5 Flash")
+    if os.environ.get("OPENAI_API_KEY"): st.session_state.user_configured_models.append("OpenAI GPT-4o")
+    if os.environ.get("ANTHROPIC_API_KEY"): st.session_state.user_configured_models.append("Anthropic Claude 3.5 Sonnet")
 
 # Auth States
 if 'user' not in st.session_state:
@@ -360,18 +364,23 @@ def settings_modal():
                 st.rerun()
                 
             # Key input
+            global_val = os.environ.get(required_env_key, "")
             current_val = st.session_state.stored_keys.get(required_env_key, "")
-            new_val = st.text_input(
-                f"{provider_name} API Key", 
-                value=current_val, 
-                type="password", 
-                key=f"input_{required_env_key}_{idx}",
-                label_visibility="collapsed",
-                placeholder=f"Enter {required_env_key}"
-            )
             
-            if new_val != current_val:
-                st.session_state.stored_keys[required_env_key] = new_val
+            if global_val and current_val == global_val:
+                st.info(f"✅ Securely provided by Administrator/Global Env.")
+            else:
+                new_val = st.text_input(
+                    f"{provider_name} API Key", 
+                    value=current_val, 
+                    type="password", 
+                    key=f"input_{required_env_key}_{idx}",
+                    label_visibility="collapsed",
+                    placeholder=f"Enter {required_env_key}"
+                )
+                
+                if new_val != current_val:
+                    st.session_state.stored_keys[required_env_key] = new_val
                 
             st.divider()
             
@@ -658,8 +667,8 @@ if st.session_state.execution_tier == "standard":
             st.error(f"Error connecting to data source: {str(e)}")
             st.stop()
     
-        # UI for choosing between AI Generation or Loading a Template
-        tab_ai, tab_template = st.tabs(["✨ Auto-Map with AI", "📥 Load Saved Template"])
+        # UI for choosing between AI Generation or Loading a Template or Manual Mapping
+        tab_ai, tab_template, tab_manual = st.tabs(["✨ Auto-Map with AI", "📥 Load Saved Template", "🛠️ Manual Mapping"])
     
         with tab_ai:
             st.markdown("<div style='margin-bottom: 10px; color: #cbd5e1;'>Let our AI automatically analyze the selected files and resolve schema differences.</div>", unsafe_allow_html=True)
@@ -724,6 +733,16 @@ if st.session_state.execution_tier == "standard":
                         st.error(f"Failed to load template: {str(e)}")
             else:
                 st.info("🔒 Log in to a free account to load saved mapping templates.")
+                
+        with tab_manual:
+            st.markdown("<div style='margin-bottom: 10px; color: #cbd5e1;'>Bypass the AI and templates entirely. Build your mapping grid manually.</div>", unsafe_allow_html=True)
+            if st.button("🛠️ Setup Manual Mappings", use_container_width=True, key="s_manual"):
+                f1_cols = conn1.get_sample_data(1).columns.tolist()
+                f2_cols = conn2.get_sample_data(1).columns.tolist()
+                empty_mappings = [ColumnMap(file1_column=str(c1), file2_column=str(c2) if c2 in f2_cols else None) for c1, c2 in zip(f1_cols, f2_cols)]
+                st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=empty_mappings, ignore_columns=[])
+                st.session_state.is_template_loaded = False
+                st.success("Manual Mapping Grid Ready!")
                 
         # If we have a configuration (either just generated, or from previous click)
         if st.session_state.ai_config:
@@ -965,8 +984,8 @@ elif st.session_state.execution_tier == "heavy":
              st.warning(f"⚠️ You must configure your `{required_env_key}` in the ⚙️ Settings menu (top right) to use {selected_model_display}.")
              st.stop()
              
-        # UI for choosing AI Mapping Generation vs Uploading a Heavy Template
-        tab_ai, tab_template = st.tabs(["✨ Auto-Map Header Rows with AI", "📥 Load Saved Template"])
+        # UI for choosing AI Mapping Generation vs Uploading a Heavy Template vs Manual Mapping
+        tab_ai, tab_template, tab_manual = st.tabs(["✨ Auto-Map Header Rows with AI", "📥 Load Saved Template", "🛠️ Manual Mapping"])
         
         with tab_ai:
             st.markdown("<div style='margin-bottom: 10px; color: #cbd5e1;'>Let our AI automatically analyze the selected files and resolve schema differences.</div>", unsafe_allow_html=True)
@@ -1032,6 +1051,22 @@ elif st.session_state.execution_tier == "heavy":
                         st.error(f"Failed to load template: {str(e)}")
             else:
                 st.info("🔒 Log in to a free account to load saved mapping templates.")
+                
+        with tab_manual:
+            st.markdown("<div style='margin-bottom: 10px; color: #cbd5e1;'>Bypass the AI and templates entirely. Build your mapping grid manually.</div>", unsafe_allow_html=True)
+            if st.button("🛠️ Setup Manual Mappings", use_container_width=True, key="h_manual"):
+                import duckdb
+                duckdb.execute("INSTALL spatial; LOAD spatial;")
+                def get_duck_read(path: str) -> str:
+                    return f"st_read('{path}')" if path.lower().endswith(('.xls', '.xlsx')) else f"read_csv_auto('{path}')"
+                # Pre-fill an empty config with the columns layout
+                f1_cols = duckdb.query(f"SELECT * FROM {get_duck_read(t1_name)} LIMIT 1").df().columns.tolist()
+                f2_cols = duckdb.query(f"SELECT * FROM {get_duck_read(t2_name)} LIMIT 1").df().columns.tolist()
+                empty_mappings = [ColumnMap(file1_column=str(c1), file2_column=str(c2) if c2 in f2_cols else None) for c1, c2 in zip(f1_cols, f2_cols)]
+                st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=empty_mappings, ignore_columns=[])
+                st.session_state.heavy_files = (t1_name, t2_name)
+                st.session_state.is_h_template_loaded = False
+                st.success("Manual Mapping Grid Ready!")
 
         # --- HEAVY GRID CONFIGURATOR ---
         if st.session_state.ai_config and st.session_state.get('heavy_files'):
