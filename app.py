@@ -968,10 +968,16 @@ elif st.session_state.execution_tier == "heavy":
         source_1_path = source_1_path.strip('\"\'')
         source_2_path = source_2_path.strip('\"\'')
         
-        t1_name, t2_name = None, None
-        if os.path.exists(source_1_path) and os.path.exists(source_2_path):
-            t1_name = source_1_path
-            t2_name = source_2_path
+        if not os.path.exists(source_1_path) or not os.path.exists(source_2_path):
+            st.markdown("---")
+            if not os.path.exists(source_1_path):
+                st.error(f"❌ Source path not found on your local disk: `{source_1_path}`")
+            if not os.path.exists(source_2_path):
+                st.error(f"❌ Target path not found on your local disk: `{source_2_path}`")
+            st.stop()
+            
+        t1_name = source_1_path
+        t2_name = source_2_path
             
         st.markdown("---")
         st.subheader("🧠 Step 2: Select AI Model & Map Schema")
@@ -1186,12 +1192,6 @@ elif st.session_state.execution_tier == "heavy":
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("🔄 Restart Validation", use_container_width=True, key="h_reset"):
                     reset_app()
-    elif source_1_path or source_2_path:
-        st.markdown("---")
-        if source_1_path and not os.path.exists(source_1_path):
-            st.error(f"❌ Source path not found on your local disk: `{source_1_path}`")
-        if source_2_path and not os.path.exists(source_2_path):
-            st.error(f"❌ Target path not found on your local disk: `{source_2_path}`")
 
 elif st.session_state.execution_tier == "pushdown":
     st.markdown(f"**🟢 Active Engine:** Enterprise SQL Warehouses")
