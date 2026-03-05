@@ -883,7 +883,7 @@ if st.session_state.execution_tier == "standard":
                     return buffer.getvalue()
 
                 # Create tabs for clean viewing
-                tab1, tab2, tab3 = st.tabs(["Mismatched Values", "Missing in Source", "Missing in External"])
+                tab1, tab2, tab3 = st.tabs(["Mismatched Values", "Missing in Source", "Missing in Target"])
             
                 with tab1:
                     mismatches = results.get('mismatches', [])
@@ -915,16 +915,16 @@ if st.session_state.execution_tier == "standard":
                      
                 with tab3:
                      missing_f2 = results.get('missing_in_file2', [])
-                     st.metric("Total Rows Missing in External File", len(missing_f2))
+                     st.metric("Total Rows Missing in Target File", len(missing_f2))
                      if missing_f2:
                          df_miss2 = pd.DataFrame(missing_f2)
                          c1, c2 = st.columns(2)
                          with c1:
                              csv_data = df_miss2.to_csv(index=False).encode('utf-8')
-                             st.download_button("Download Missing (External) (CSV)", data=csv_data, file_name="missing_external.csv", mime="text/csv", use_container_width=True)
+                             st.download_button("Download Missing (Target) (CSV)", data=csv_data, file_name="missing_target.csv", mime="text/csv", use_container_width=True)
                          with c2:
-                             excel_data = to_excel_download(df_miss2, "Missing External")
-                             st.download_button("Download Missing (External) (Excel)", data=excel_data, file_name="missing_external.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                             excel_data = to_excel_download(df_miss2, "Missing Target")
+                             st.download_button("Download Missing (Target) (Excel)", data=excel_data, file_name="missing_target.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
                          st.dataframe(df_miss2)
             
         st.markdown("<br>", unsafe_allow_html=True)
