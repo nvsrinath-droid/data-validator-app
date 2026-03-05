@@ -127,21 +127,36 @@ def inject_premium_css():
     
     /* Tabs */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: rgba(255, 255, 255, 0.03);
-        padding: 8px;
+        gap: 12px;
+        background-color: rgba(15, 23, 42, 0.6);
+        padding: 10px;
         border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: center;
+        align-items: stretch;
     }
     .stTabs [data-baseweb="tab"] {
         background-color: transparent;
-        border-radius: 10px;
+        border-radius: 12px;
         color: #94a3b8 !important;
         border: none !important;
+        font-size: 1.05rem !important;
+        padding: 14px 24px !important;
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        transition: all 0.2s ease;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+        color: #e2e8f0 !important;
     }
     .stTabs [aria-selected="true"] {
-        background-color: rgba(255, 255, 255, 0.1) !important;
+        background-color: #3b82f6 !important;
         color: white !important;
+        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3) !important;
+        font-weight: 600 !important;
     }
 
     /* Info/Warning/Error boxes and Tier Cards */
@@ -860,14 +875,12 @@ if st.session_state.execution_tier == "standard":
                             })
                     return pd.DataFrame(flat_data)
 
-                # We need a helper to generate CSV strings for download
-                def to_csv_download(data_dict_list, is_mismatch=False):
-                    if not data_dict_list: return None
-                
-                    if is_mismatch:
-                         return get_flattened_mismatches_df(data_dict_list).to_csv(index=False).encode('utf-8')
-                    else:
-                         return pd.DataFrame(data_dict_list).to_csv(index=False).encode('utf-8')
+                # We need a helper to generate Excel strings for download
+                def to_excel_download(df, sheet_name="Data"):
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False, sheet_name=sheet_name)
+                    return buffer.getvalue()
 
                 # Create tabs for clean viewing
                 tab1, tab2, tab3 = st.tabs(["Mismatched Values", "Missing in Source", "Missing in External"])
@@ -877,25 +890,42 @@ if st.session_state.execution_tier == "standard":
                     st.metric("Total Mismatched Rows", len(mismatches))
                     if mismatches:
                         flat_df = get_flattened_mismatches_df(mismatches)
-                        csv_data = flat_df.to_csv(index=False).encode('utf-8')
-                        st.download_button("Download Mismatches CSV", data=csv_data, file_name="mismatches.csv", mime="text/csv")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            csv_data = flat_df.to_csv(index=False).encode('utf-8')
+                            st.download_button("Download Mismatches (CSV)", data=csv_data, file_name="mismatches.csv", mime="text/csv", use_container_width=True)
+                        with c2:
+                            excel_data = to_excel_download(flat_df, "Mismatches")
+                            st.download_button("Download Mismatches (Excel)", data=excel_data, file_name="mismatches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
                         st.dataframe(flat_df.astype(str)) # Easy viewer
             
                 with tab2:
                      missing_f1 = results.get('missing_in_file1', [])
                      st.metric("Total Rows Missing in Source File", len(missing_f1))
                      if missing_f1:
-                         csv_data = to_csv_download(missing_f1)
-                         st.download_button("Download Missing (Source) CSV", data=csv_data, file_name="missing_source.csv", mime="text/csv")
-                         st.dataframe(pd.DataFrame(missing_f1))
+                         df_miss1 = pd.DataFrame(missing_f1)
+                         c1, c2 = st.columns(2)
+                         with c1:
+                             csv_data = df_miss1.to_csv(index=False).encode('utf-8')
+                             st.download_button("Download Missing (Source) (CSV)", data=csv_data, file_name="missing_source.csv", mime="text/csv", use_container_width=True)
+                         with c2:
+                             excel_data = to_excel_download(df_miss1, "Missing Source")
+                             st.download_button("Download Missing (Source) (Excel)", data=excel_data, file_name="missing_source.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                         st.dataframe(df_miss1)
                      
                 with tab3:
                      missing_f2 = results.get('missing_in_file2', [])
                      st.metric("Total Rows Missing in External File", len(missing_f2))
                      if missing_f2:
-                         csv_data = to_csv_download(missing_f2)
-                         st.download_button("Download Missing (External) CSV", data=csv_data, file_name="missing_external.csv", mime="text/csv")
-                         st.dataframe(pd.DataFrame(missing_f2))
+                         df_miss2 = pd.DataFrame(missing_f2)
+                         c1, c2 = st.columns(2)
+                         with c1:
+                             csv_data = df_miss2.to_csv(index=False).encode('utf-8')
+                             st.download_button("Download Missing (External) (CSV)", data=csv_data, file_name="missing_external.csv", mime="text/csv", use_container_width=True)
+                         with c2:
+                             excel_data = to_excel_download(df_miss2, "Missing External")
+                             st.download_button("Download Missing (External) (Excel)", data=excel_data, file_name="missing_external.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                         st.dataframe(df_miss2)
             
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 Restart Validation", use_container_width=True):
