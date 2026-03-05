@@ -968,9 +968,11 @@ elif st.session_state.execution_tier == "heavy":
         source_1_path = source_1_path.strip('\"\'')
         source_2_path = source_2_path.strip('\"\'')
         
+        t1_name, t2_name = None, None
         if os.path.exists(source_1_path) and os.path.exists(source_2_path):
             t1_name = source_1_path
             t2_name = source_2_path
+            
         st.markdown("---")
         st.subheader("🧠 Step 2: Select AI Model & Map Schema")
         
@@ -996,21 +998,24 @@ elif st.session_state.execution_tier == "heavy":
             if st.button(f"✨ Auto-Map Header Rows with {selected_model_display}", type="primary", use_container_width=True, key="h_analyze"):
                 with st.spinner(f'Extracting headers and building a mapping schema...'):
                     try:
-                        # DuckDB requires the spatial extension to read Excel natively
-                        import duckdb
-                        duckdb.execute("INSTALL spatial; LOAD spatial;")
-                        
-                        def get_duck_read(path: str) -> str:
-                            return f"st_read('{path}')" if path.lower().endswith(('.xls', '.xlsx')) else f"read_csv_auto('{path}')"
-                        
-                        s1_header = duckdb.query(f"SELECT * FROM {get_duck_read(t1_name)} LIMIT 5").df()
-                        s2_header = duckdb.query(f"SELECT * FROM {get_duck_read(t2_name)} LIMIT 5").df()
-                        
-                        agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
-                        st.session_state.ai_config = agent.suggest_configuration(s1_header.to_csv(index=False), s2_header.to_csv(index=False))
-                        st.session_state.heavy_files = (t1_name, t2_name)
-                        st.session_state.is_h_template_loaded = False
-                        st.success("AI Schema Analysis Complete!")
+                        if not t1_name or not t2_name:
+                            st.error("Please enter valid file paths in Step 1 first.")
+                        else:
+                            # DuckDB requires the spatial extension to read Excel natively
+                            import duckdb
+                            duckdb.execute("INSTALL spatial; LOAD spatial;")
+                            
+                            def get_duck_read(path: str) -> str:
+                                return f"st_read('{path}')" if path.lower().endswith(('.xls', '.xlsx')) else f"read_csv_auto('{path}')"
+                            
+                            s1_header = duckdb.query(f"SELECT * FROM {get_duck_read(t1_name)} LIMIT 5").df()
+                            s2_header = duckdb.query(f"SELECT * FROM {get_duck_read(t2_name)} LIMIT 5").df()
+                            
+                            agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
+                            st.session_state.ai_config = agent.suggest_configuration(s1_header.to_csv(index=False), s2_header.to_csv(index=False))
+                            st.session_state.heavy_files = (t1_name, t2_name)
+                            st.session_state.is_h_template_loaded = False
+                            st.success("AI Schema Analysis Complete!")
                     except Exception as e:
                         st.error(f"Error during AI analysis: {str(e)}")
                         
@@ -1059,18 +1064,21 @@ elif st.session_state.execution_tier == "heavy":
         with tab_manual:
             st.markdown("<div style='margin-bottom: 10px; color: #cbd5e1;'>Bypass the AI and templates entirely. Build your mapping grid manually.</div>", unsafe_allow_html=True)
             if st.button("🛠️ Setup Manual Mappings", use_container_width=True, key="h_manual"):
-                import duckdb
-                duckdb.execute("INSTALL spatial; LOAD spatial;")
-                def get_duck_read(path: str) -> str:
-                    return f"st_read('{path}')" if path.lower().endswith(('.xls', '.xlsx')) else f"read_csv_auto('{path}')"
-                # Pre-fill an empty config with the columns layout
-                f1_cols = duckdb.query(f"SELECT * FROM {get_duck_read(t1_name)} LIMIT 1").df().columns.tolist()
-                f2_cols = duckdb.query(f"SELECT * FROM {get_duck_read(t2_name)} LIMIT 1").df().columns.tolist()
-                empty_mappings = [ColumnMap(file1_column=str(c1), file2_column=str(c2) if c2 in f2_cols else None) for c1, c2 in zip(f1_cols, f2_cols)]
-                st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=empty_mappings, ignore_columns=[])
-                st.session_state.heavy_files = (t1_name, t2_name)
-                st.session_state.is_h_template_loaded = False
-                st.success("Manual Mapping Grid Ready!")
+                if not t1_name or not t2_name:
+                    st.error("Please enter valid file paths in Step 1 first.")
+                else:
+                    import duckdb
+                    duckdb.execute("INSTALL spatial; LOAD spatial;")
+                    def get_duck_read(path: str) -> str:
+                        return f"st_read('{path}')" if path.lower().endswith(('.xls', '.xlsx')) else f"read_csv_auto('{path}')"
+                    # Pre-fill an empty config with the columns layout
+                    f1_cols = duckdb.query(f"SELECT * FROM {get_duck_read(t1_name)} LIMIT 1").df().columns.tolist()
+                    f2_cols = duckdb.query(f"SELECT * FROM {get_duck_read(t2_name)} LIMIT 1").df().columns.tolist()
+                    empty_mappings = [ColumnMap(file1_column=str(c1), file2_column=str(c2) if c2 in f2_cols else None) for c1, c2 in zip(f1_cols, f2_cols)]
+                    st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=empty_mappings, ignore_columns=[])
+                    st.session_state.heavy_files = (t1_name, t2_name)
+                    st.session_state.is_h_template_loaded = False
+                    st.success("Manual Mapping Grid Ready!")
 
         # --- HEAVY GRID CONFIGURATOR ---
         if st.session_state.ai_config and st.session_state.get('heavy_files'):
