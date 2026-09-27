@@ -279,7 +279,7 @@ tests/                 pytest suite
 
 ## About
 
-I'm Ven, an ERP and data architect. I spent 20+ years implementing Oracle
+I'm Venkata Srinath Nanduri (Ven), an ERP and data architect. I spent 20+ years implementing Oracle
 JD Edwards across manufacturing, oil & gas, mining, public sector and real
 estate, and more recently I've been the solution architect on a program
 consolidating several ERPs (JD Edwards, Oracle EBS, Oracle Fusion, Glovia,
@@ -294,4 +294,4 @@ deterministic, tested engine decides what reconciles.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Released under the MIT License. See [LICENSE](LICENSE).
