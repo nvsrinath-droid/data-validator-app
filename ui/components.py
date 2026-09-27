@@ -125,7 +125,7 @@ def _mapping_sources(pair: DataPair, key: str, agent: Optional[AIAgent]):
                 st.error(f"Could not read columns: {pair.redact(str(e))}")
 
 
-def _mapping_editor(pair: DataPair, key: str) -> Tuple[list, pd.DataFrame, dict]:
+def _mapping_editor(pair: DataPair, key: str, file_slug: str) -> Tuple[list, pd.DataFrame, dict]:
     config = st.session_state.ai_config
     source_cols, target_cols = _columns(pair, "source"), _columns(pair, "target")
 
@@ -161,14 +161,15 @@ def _mapping_editor(pair: DataPair, key: str) -> Tuple[list, pd.DataFrame, dict]
 
     if not st.session_state.is_guest:
         st.download_button("💾 Save As Mapping Template (Excel)", template_bytes(grid, pk_cols),
-                           file_name=f"truealign_{key}_mapping_template.xlsx",
+                           file_name=f"truealign_{file_slug}_mapping_template.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                            help="Download these mappings and primary keys to load them instantly next time",
                            key=f"{key}_tpl_dl")
     return pk_cols, grid, options
 
 
-def render_mapping_workflow(pair: DataPair, key: str, run_label: str, spinner: str, results_title: str):
+def render_mapping_workflow(pair: DataPair, key: str, run_label: str, spinner: str, results_title: str,
+                            file_slug: str):
     """Step 2 (map schema) through results, identical for every tier."""
     if st.session_state.get("config_signature") != (key, pair.signature):
         # inputs changed: a mapping built for other data would be misleading
@@ -185,7 +186,7 @@ def render_mapping_workflow(pair: DataPair, key: str, run_label: str, spinner: s
         return
 
     try:
-        pk_cols, grid, options = _mapping_editor(pair, key)
+        pk_cols, grid, options = _mapping_editor(pair, key, file_slug)
     except Exception as e:
         st.error(f"Could not read columns: {pair.redact(str(e))}")
         return

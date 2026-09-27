@@ -57,7 +57,7 @@ class ConnectorPair(DataPair):
 
 
 class FilePair(DataPair):
-    """Heavy tier: DuckDB streams large CSV / Excel files from disk."""
+    """Massive Data Files tier: DuckDB streams large CSV / Excel files from disk."""
 
     def __init__(self, source_path: str, target_path: str):
         self.paths = dict(zip(SIDES, (source_path, target_path)))

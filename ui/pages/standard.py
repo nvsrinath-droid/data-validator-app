@@ -46,5 +46,5 @@ def render():
         return
 
     render_mapping_workflow(ConnectorPair(conn1, conn2, signature=(sig1, sig2)), "std",
-                            run_label="🚀 Run Full Data Comparison", spinner="Comparing all rows...",
-                            results_title="📊 Validation Results")
+                            run_label="🚀 Run Standard Comparison (In Memory)", spinner="Comparing all rows...",
+                            results_title="📊 Standard Validation Results", file_slug="standard")

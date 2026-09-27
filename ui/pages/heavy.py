@@ -48,6 +48,6 @@ def render():
         return
 
     render_mapping_workflow(FilePair(file_1, file_2), "heavy",
-                            run_label="🚀 Run Heavy File Comparison (Disk Streaming)",
+                            run_label="🚀 Run Massive File Comparison (Disk Streaming)",
                             spinner="Piping massive files to the DuckDB analytic engine...",
-                            results_title="📊 Heavy Validation Results")
+                            results_title="📊 Massive File Validation Results", file_slug="massive")

@@ -129,6 +129,12 @@ def _app(engine=None):
     return at
 
 
+def assert_tier_labels(at, key, tier_word):
+    """Run button and results title use the tier's landing-page name (no "Heavy" / "Remote" leftovers)."""
+    assert tier_word in at.button(key=f"{key}_run").label
+    assert any(tier_word in h.value and "Validation Results" in h.value for h in at.subheader)
+
+
 def test_app_landing_page_renders():
     at = _app().run()
     assert not at.exception
@@ -152,6 +158,7 @@ def test_heavy_tier_end_to_end_with_manual_mapping():
     assert not at.exception and not at.error, [e.value for e in at.error]
     metrics = {m.label: m.value for m in at.metric}
     assert metrics["Matched Rows"] == "10" and metrics["Mismatched Rows"] == "0"
+    assert_tier_labels(at, "heavy", "Massive")
 
 
 def test_pushdown_tier_end_to_end_on_sqlite():
@@ -167,6 +174,7 @@ def test_pushdown_tier_end_to_end_on_sqlite():
     assert not at.exception and not at.error, [e.value for e in at.error]
     metrics = {m.label: m.value for m in at.metric}
     assert metrics["Mismatched Rows"] == "5"  # UPPER(full_name) differs on every row
+    assert_tier_labels(at, "pd", "Enterprise")
 
 
 def test_standard_tier_end_to_end_with_sql_sources():
@@ -183,6 +191,7 @@ def test_standard_tier_end_to_end_with_sql_sources():
     at.button(key="std_run").click().run()
     assert not at.exception and not at.error, [e.value for e in at.error]
     assert {m.label: m.value for m in at.metric}["Mismatched Rows"] == "5"
+    assert_tier_labels(at, "std", "Standard")
 
 
 def test_duckdb_reads_excel_without_extensions(tmp_path):

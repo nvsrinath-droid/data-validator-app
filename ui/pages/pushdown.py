@@ -10,7 +10,7 @@ from ..components import render_connection_fields, render_mapping_workflow
 def render():
     st.markdown("**🟢 Active Engine:** Enterprise SQL Warehouses (pushdown)")
 
-    st.subheader("🏢 Enterprise Database Connection")
+    st.subheader("🌐 Enterprise Database Connection")
     st.markdown("Both queries run inside this database. Only counts and a capped sample of exceptions are downloaded.")
     url = render_connection_fields("pd", label="SQL Dialect")
 
@@ -36,6 +36,6 @@ def render():
         st.error(f"Database connection failed: {redact(str(e), url)}")
         return
 
-    render_mapping_workflow(pair, "pd", run_label="🚀 Push Validation Execution to Database",
+    render_mapping_workflow(pair, "pd", run_label="🚀 Run Enterprise Warehouse Comparison (Pushdown)",
                             spinner="Pushing the comparison down to the database...",
-                            results_title="📊 Remote Database Execution Results")
+                            results_title="📊 Enterprise Warehouse Validation Results", file_slug="enterprise")
