@@ -263,6 +263,7 @@ from connectors.sql_connector import SQLConnector
 from ai.agent import AIAgent
 from core.schemas import ValidationConfig, ColumnMap
 from core.comparator import DataComparator
+from core.db import redact, sample_query
 
 # Load ENV logic specifically for the web app missing a .env
 load_dotenv()
@@ -468,6 +469,12 @@ def render_results(res, key_prefix: str, title: str = "📊 Validation Results")
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        type="primary", use_container_width=True, key=f"{key_prefix}_full")
 
+def resolve_ai_rules(config, model_name, api_key):
+    """Ask the AI to translate rules the built-in parser can't read into a validated RuleSpec."""
+    from ai.agent import resolve_rules
+    agent = AIAgent(model_name=model_name, api_key=api_key) if api_key else None
+    return resolve_rules(config, agent)
+
 # We use session state to hold the AI's configuration so it doesn't regenerate on every button click
 if 'ai_config' not in st.session_state:
     st.session_state.ai_config = None
@@ -541,44 +548,38 @@ if not st.session_state.user and not st.session_state.is_guest:
     st.markdown("<p style='text-align:center; color:#94a3b8; font-size:0.9rem;'>Google/Apple Sign-In integration is pending Developer Key approval from Identity Providers.</p>", unsafe_allow_html=True)
     st.stop()
 
-def render_sql_form(key_prefix):
-    db_type = st.selectbox("Database Type", ["Snowflake", "Microsoft SQL Server", "Oracle", "PostgreSQL", "SQLite (Local)"], key=f"db_type_{key_prefix}")
-    
-    conn_str = ""
+def render_connection_fields(key_prefix, label="Database Type"):
+    """Database connection inputs. Returns a SQLAlchemy URL (password masked when printed) or None."""
+    from core.db import DB_TYPES, DEFAULT_PORTS, build_url
+
+    db_type = st.selectbox(label, DB_TYPES, key=f"db_type_{key_prefix}")
     if db_type == "SQLite (Local)":
         db_path = st.text_input("Database File Path", placeholder="local_production.db", key=f"sqlite_{key_prefix}")
-        if db_path:
-            conn_str = f"sqlite:///{db_path}"
-    else:
-        # Enterprise DB Form
-        c1, c2 = st.columns([3, 1])
-        host = c1.text_input("Host / Server Address", placeholder="e.g., my-account.snowflakecomputing.com", key=f"host_{key_prefix}")
-        
-        # Default ports
-        default_port = {"Snowflake": "443", "Microsoft SQL Server": "1433", "Oracle": "1521", "PostgreSQL": "5432"}[db_type]
-        port = c2.text_input("Port", value=default_port, key=f"port_{key_prefix}")
-        
-        db_name = st.text_input("Database Name", key=f"db_{key_prefix}")
-        
-        c3, c4 = st.columns(2)
-        user = c3.text_input("Username", key=f"user_{key_prefix}")
-        password = c4.text_input("Password", type="password", key=f"pass_{key_prefix}")
-        
-        if host and db_name and user and password:
-            if db_type == "Snowflake":
-                conn_str = f"snowflake://{user}:{password}@{host}/{db_name}"
-            elif db_type == "Microsoft SQL Server":
-                # Assuming pyodbc is installed
-                conn_str = f"mssql+pyodbc://{user}:{password}@{host}:{port}/{db_name}?driver=ODBC+Driver+17+for+SQL+Server"
-            elif db_type == "Oracle":
-                conn_str = f"oracle+oracledb://{user}:{password}@{host}:{port}/?service_name={db_name}"
-            elif db_type == "PostgreSQL":
-                conn_str = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+        return build_url(db_type, sqlite_path=db_path) if db_path else None
 
+    c1, c2 = st.columns([3, 1])
+    host_hint = "e.g., my-account (or my-account.snowflakecomputing.com)" if db_type == "Snowflake" else "e.g., db.example.com"
+    host = c1.text_input("Host / Server Address", placeholder=host_hint, key=f"host_{key_prefix}")
+    port = c2.text_input("Port", value=DEFAULT_PORTS[db_type], key=f"port_{key_prefix}")
+    db_hint = {"Oracle": "Service name, e.g., ORCLPDB1", "Snowflake": "DATABASE or DATABASE/SCHEMA"}.get(db_type, "")
+    db_name = st.text_input("Database Name", placeholder=db_hint, key=f"db_{key_prefix}")
+    c3, c4 = st.columns(2)
+    user = c3.text_input("Username", key=f"user_{key_prefix}")
+    password = c4.text_input("Password", type="password", key=f"pass_{key_prefix}")
+
+    if host and db_name and user and password:
+        try:
+            return build_url(db_type, host, port, db_name, user, password)
+        except ValueError:
+            st.error("Port must be a number.")
+    return None
+
+
+def render_sql_form(key_prefix):
+    url = render_connection_fields(key_prefix)
     query = st.text_area("SQL Query", placeholder="SELECT * FROM table_name", key=f"q_{key_prefix}")
-    
-    if conn_str and query:
-        return {"type": "sql", "conn_str": conn_str, "query": query}
+    if url is not None and query:
+        return {"type": "sql", "url": url, "query": query}
     return None
 
 # --- SPLASH PAGE ROUTER WITH BROWSER TAB SYNC ---
@@ -719,7 +720,7 @@ if st.session_state.execution_tier == "standard":
         # Init connectors dynamically based on the user's choice
         def init_connector(source_data):
             if isinstance(source_data, dict) and source_data.get('type') == 'sql':
-                return SQLConnector(source_data['conn_str'], source_data['query'])
+                return SQLConnector(source_data['url'], source_data['query'])
             else:
                 return FileConnector(source_data)
             
@@ -727,7 +728,11 @@ if st.session_state.execution_tier == "standard":
             conn1 = init_connector(source_1)
             conn2 = init_connector(source_2)
         except Exception as e:
-            st.error(f"Error connecting to data source: {str(e)}")
+            msg = str(e)
+            for src in (source_1, source_2):
+                if isinstance(src, dict):
+                    msg = redact(msg, src.get('url'))
+            st.error(f"Error connecting to data source: {msg}")
             st.stop()
     
         # UI for choosing between AI Generation or Loading a Template or Manual Mapping
@@ -901,11 +906,13 @@ if st.session_state.execution_tier == "standard":
                         column_mappings=new_mappings,
                         ignore_columns=[]
                     )
-                
+                    final_config, ai_notes = resolve_ai_rules(final_config, litellm_model_str, active_api_key)
+
                     # Execute Core Logic
                     try:
                         comparator = DataComparator(final_config)
                         st.session_state.results = comparator.compare(conn1.read_data(), conn2.read_data())
+                        st.session_state.results.warnings[:0] = ai_notes
                         st.toast('Comparison Complete!', icon='🎉')
                     except ValueError as e:
                         st.error(str(e))
@@ -1137,12 +1144,14 @@ elif st.session_state.execution_tier == "heavy":
                             new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule or None))
                     
                     final_config = ValidationConfig(primary_keys=pk_cols, column_mappings=new_mappings)
-                    
+                    final_config, ai_notes = resolve_ai_rules(final_config, litellm_model_str, active_api_key)
+
                     from core.engines.duckdb_engine import DuckDBEngine
                     heavy_engine = DuckDBEngine(final_config)
                     
                     try:
                         st.session_state.results = heavy_engine.compare(f1_path, f2_path)
+                        st.session_state.results.warnings[:0] = ai_notes
                         st.toast('Massive Comparison Complete!', icon='🐘')
                     except Exception as e:
                         st.error(f"DuckDB Query Failed: {str(e)}")
@@ -1162,26 +1171,7 @@ elif st.session_state.execution_tier == "pushdown":
     st.markdown("Enter your database credentials to execute validation natively.")
     
     # We use a single connection for the Pushdown engine so records can be joined natively
-    db_type_pd = st.selectbox("SQL Dialect", ["Snowflake", "Microsoft SQL Server", "Oracle", "PostgreSQL", "SQLite (Local)"], key="pd_db_type")
-    
-    conn_str_pd = ""
-    if db_type_pd == "SQLite (Local)":
-        db_path = st.text_input("Database File Path", placeholder="local_production.db", key="pd_sqlite")
-        if db_path: conn_str_pd = f"sqlite:///{db_path}"
-    else:
-        c1, c2 = st.columns([3, 1])
-        host = c1.text_input("Server Host", key="pd_host")
-        port = c2.text_input("Port", value={"Snowflake": "443", "Microsoft SQL Server": "1433", "Oracle": "1521", "PostgreSQL": "5432"}[db_type_pd], key="pd_port")
-        db_name = st.text_input("Database Name", key="pd_db")
-        c3, c4 = st.columns(2)
-        user = c3.text_input("Username", key="pd_user")
-        password = c4.text_input("Password", type="password", key="pd_pass")
-        
-        if host and db_name and user and password:
-            if db_type_pd == "Snowflake": conn_str_pd = f"snowflake://{user}:{password}@{host}/{db_name}"
-            elif db_type_pd == "Microsoft SQL Server": conn_str_pd = f"mssql+pyodbc://{user}:{password}@{host}:{port}/{db_name}?driver=ODBC+Driver+17+for+SQL+Server"
-            elif db_type_pd == "Oracle": conn_str_pd = f"oracle+oracledb://{user}:{password}@{host}:{port}/?service_name={db_name}"
-            elif db_type_pd == "PostgreSQL": conn_str_pd = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+    conn_url_pd = render_connection_fields("pd", label="SQL Dialect")
 
     st.markdown("---")
     c_q1, c_q2 = st.columns(2)
@@ -1192,7 +1182,7 @@ elif st.session_state.execution_tier == "pushdown":
         st.subheader("📄 Target Data (To Compare)")
         q2 = st.text_area("SQL Query 2", placeholder="SELECT * FROM external_vendor_table", key="pd_q2")
 
-    if conn_str_pd and q1 and q2:
+    if conn_url_pd is not None and q1 and q2:
         st.markdown("---")
         st.subheader("🧠 Step 2: Select AI Model & Map Schema")
         
@@ -1217,18 +1207,15 @@ elif st.session_state.execution_tier == "pushdown":
             if st.button(f"✨ Auto-Map Queries with {selected_model_display}", type="primary", use_container_width=True, key="pd_analyze"):
                 with st.spinner(f'Extracting headers from the database and building a mapping schema...'):
                     try:
-                        from sqlalchemy import create_engine, text
-                        tmp_engine = create_engine(conn_str_pd)
-                        with tmp_engine.connect() as conn:
-                            s1_sample = pd.read_sql(text(q1 + " LIMIT 5" if "LIMIT" not in q1.upper() else q1), conn)
-                            s2_sample = pd.read_sql(text(q2 + " LIMIT 5" if "LIMIT" not in q2.upper() else q2), conn)
+                        s1_sample = sample_query(conn_url_pd, q1, 5)
+                        s2_sample = sample_query(conn_url_pd, q2, 5)
                             
                         agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
                         st.session_state.ai_config = agent.suggest_configuration(s1_sample.to_csv(index=False), s2_sample.to_csv(index=False))
-                        st.session_state.pd_data = (conn_str_pd, q1, q2)
+                        st.session_state.pd_data = (conn_url_pd, q1, q2)
                         st.success("AI Schema Analysis Complete!")
                     except Exception as e:
-                        st.error(f"Database Query Failed: {str(e)}")
+                        st.error(f"Database Query Failed: {redact(str(e), conn_url_pd)}")
                         
         with c_upload:
             template_file = st.file_uploader("📥 Or load a Saved Template (CSV)", type=["csv"], key=f"pdtpl_{st.session_state.uploader_key}", label_visibility="collapsed")
@@ -1246,7 +1233,7 @@ elif st.session_state.execution_tier == "pushdown":
                                 new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
                         
                         st.session_state.ai_config = ValidationConfig(primary_keys=[], column_mappings=new_mappings, ignore_columns=[])
-                        st.session_state.pd_data = (conn_str_pd, q1, q2)
+                        st.session_state.pd_data = (conn_url_pd, q1, q2)
                         st.success("Template Loaded Successfully!")
                 except Exception as e:
                     st.error(f"Failed to load template: {str(e)}")
@@ -1258,11 +1245,8 @@ elif st.session_state.execution_tier == "pushdown":
             
             # Re-fetch headers to populate mapping dropdowns
             try:
-                from sqlalchemy import create_engine, text
-                tmp_engine = create_engine(conn_str_pd)
-                with tmp_engine.connect() as conn:
-                    header1 = pd.read_sql(text(pd_q1 + " LIMIT 1" if "LIMIT" not in pd_q1.upper() else pd_q1), conn).columns.tolist()
-                    header2 = pd.read_sql(text(pd_q2 + " LIMIT 1" if "LIMIT" not in pd_q2.upper() else pd_q2), conn).columns.tolist()
+                header1 = sample_query(conn_url_pd, pd_q1, 1).columns.tolist()
+                header2 = sample_query(conn_url_pd, pd_q2, 1).columns.tolist()
             except Exception:
                 header1, header2 = [], []
                 
@@ -1310,15 +1294,17 @@ elif st.session_state.execution_tier == "pushdown":
                             new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule or None))
                     
                     final_config = ValidationConfig(primary_keys=pk_cols, column_mappings=new_mappings)
-                    
+                    final_config, ai_notes = resolve_ai_rules(final_config, litellm_model_str, active_api_key)
+
                     from core.engines.sql_pushdown import SQLPushdownEngine
                     pushdown_engine = SQLPushdownEngine(final_config)
                     
                     try:
-                        st.session_state.results = pushdown_engine.compare(conn_str_pd, pd_q1, pd_q2)
+                        st.session_state.results = pushdown_engine.compare(conn_url_pd, pd_q1, pd_q2)
+                        st.session_state.results.warnings[:0] = ai_notes
                         st.toast('Pushdown Execution Complete!', icon='🚀')
                     except Exception as e:
-                        st.error(f"Remote Execution Failed: {str(e)}")
+                        st.error(f"Remote Execution Failed: {redact(str(e), conn_url_pd)}")
                         
             # Results UI
             if st.session_state.get('results'):

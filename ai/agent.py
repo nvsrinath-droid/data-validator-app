@@ -1,122 +1,143 @@
-import os
 import json
+from typing import List, Optional, Tuple
+
 from litellm import completion
+from pydantic import ValidationError
+
+from core.rules import RuleSpec, parse_rule
 from core.schemas import ValidationConfig
 
+
+def _strip_fences(text: str) -> str:
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
+
 class AIAgent:
-    """Interacts with various LLM providers (Google, OpenAI, Anthropic, etc.) via LiteLLM."""
-    
+    """Interacts with various LLM providers (Google, OpenAI, Anthropic, etc.) via LiteLLM.
+
+    The API key is held on the instance and passed to every completion() call. It is
+    never written to os.environ, which is shared by every user of a Streamlit server.
+    """
+
     def __init__(self, model_name: str, api_key: str):
         """
-        Initializes the agent.
         Args:
-            model_name: The LiteLLM formatted model string (e.g., 'gpt-4o', 'gemini/gemini-1.5-pro', 'claude-3-5-sonnet-20240620')
+            model_name: The LiteLLM formatted model string (e.g., 'gpt-4o', 'gemini/gemini-2.5-flash')
             api_key: The API key for the respective provider.
         """
         self.model_name = model_name
         self.api_key = api_key
-        
-        # LiteLLM routing uses environment variables under the hood for some providers
-        if "gemini" in model_name.lower():
-            os.environ["GEMINI_API_KEY"] = api_key
-        elif "gpt" in model_name.lower() or "o1" in model_name.lower():
-            os.environ["OPENAI_API_KEY"] = api_key
-        elif "claude" in model_name.lower():
-            os.environ["ANTHROPIC_API_KEY"] = api_key
-        elif "groq" in model_name.lower():
-            os.environ["GROQ_API_KEY"] = api_key
-            
-    def _call_llm(self, prompt: str, schema_class=None, is_json=False) -> str:
-        """Helper to call litellm with correct JSON forcing if requested."""
-        messages = [{"role": "user", "content": prompt}]
-        
+
+    def _call_llm(self, prompt: str, is_json: bool = False) -> str:
         kwargs = {
             "model": self.model_name,
-            "messages": messages,
-            "temperature": 0.1,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "api_key": self.api_key,
         }
-        
-        # If we need structured JSON output (like the config generation)
         if is_json:
             kwargs["response_format"] = {"type": "json_object"}
-            
         try:
             response = completion(**kwargs)
             return response.choices[0].message.content
         except Exception as e:
-            raise RuntimeError(f"LLM Provider Error: {str(e)}")
+            message = str(e)
+            if self.api_key:
+                message = message.replace(self.api_key, "***")
+            raise RuntimeError(f"LLM Provider Error: {message}") from None
 
     def suggest_configuration(self, file1_sample: str, file2_sample: str) -> ValidationConfig:
         """
-        Takes string representations of the file samples and uses the LLM to 
+        Takes string representations of the file samples and uses the LLM to
         suggest a configuration schema mapping the files.
         """
         prompt = f"""
-        You are an expert data analyst AI. Let's build a data validation agent. 
+        You are an expert data analyst AI. Let's build a data validation agent.
         I want to compare two source files (File 1 and File 2) for missing rows and mismatched values.
-        
+
         Here is a sample of File 1 (the source of truth):
         {file1_sample}
-        
+
         Here is a sample of File 2 (the external file):
         {file2_sample}
-        
+
         Please analyze these samples and suggest a configuration.
         1. Identify the logical Primary Key(s) to join these datasets. If one file has a column like 'EmpID' and the other has 'Employee Identifier', those should be the primary keys.
         2. Create a column mapping dictionary where the keys are the column names in File 1, and the values are the corresponding column names in File 2.
-        
+
         Respond ONLY with a valid JSON object matching this schema:
         {{
             "primary_keys": ["KeyColNameOnFile1"],
             "column_mappings": [{{"file1_column": "File1ColA", "file2_column": "File2ColA"}}]
         }}
         """
-
         response_text = self._call_llm(prompt, is_json=True)
-
-        # Parse the response
         try:
-            # Strip markdown block formatting if the model ignored response_format
-            clean_text = response_text.strip()
-            if clean_text.startswith("```json"):
-                clean_text = clean_text[7:]
-            if clean_text.startswith("```"):
-                clean_text = clean_text[3:]
-            if clean_text.endswith("```"):
-                clean_text = clean_text[:-3]
-                
-            config_data = json.loads(clean_text)
-            return ValidationConfig(**config_data)
+            data = json.loads(_strip_fences(response_text))
+            # Only accept the fields we asked for; the model doesn't get to set rule specs.
+            return ValidationConfig(
+                primary_keys=data.get("primary_keys", []),
+                column_mappings=[{"file1_column": m["file1_column"], "file2_column": m["file2_column"]}
+                                 for m in data.get("column_mappings", [])],
+            )
         except Exception as e:
-             raise ValueError(f"Failed to parse LLM JSON mapping: {str(e)}\nRaw Response: {response_text}")
+            raise ValueError(f"Failed to parse LLM JSON mapping: {e}\nRaw Response: {response_text}")
 
-    def generate_rule_evaluator_code(self, rules_dict: dict) -> str:
-        """
-        Takes a dictionary mapping column names to plain English validation rules.
-        Uses the LLM to generate a Python function `def evaluate_rules(row):`
+    def interpret_rule(self, rule_text: str, source_column: str, target_column: str) -> RuleSpec:
+        """Translate a plain-English rule into a RuleSpec.
+
+        The model only chooses from a fixed set of rule kinds and a tolerance; the
+        result is validated by pydantic (unknown kinds and extra fields are rejected).
+        Nothing the model returns is ever executed.
         """
         prompt = f"""
-        You are an expert Python data engineer. I have a pandas dataframe containing data from two different files.
-        For a given row, the data from File 1 is accessed via `row['ColumnName_f1']` and File 2 via `row['ColumnName_f2']`.
-        
-        The user has provided the following plain-English validation rules for specific columns:
-        {json.dumps(rules_dict, indent=2)}
-        
-        Write a robust Python function named `evaluate_rules(row)` that executes these rules.
-        - Handle NaN or Null values gracefully.
-        - The function MUST return a list of dictionaries. If all rules pass, return an empty list `[]`.
-        - Each dictionary must have exactly this format: 
-          {{"column": "TheColumnName", "error": "Detailed reason it failed", "file1_value": row['TheColumnName_f1'], "file2_value": row['TheColumnName_f2']}}
-        - Do not include any explanations, imports, or markdown formatting like ```python. Just the raw python code.
-        """
+        Translate a data-reconciliation rule into JSON. The rule compares column "{source_column}"
+        (source) with column "{target_column}" (target).
 
-        code = self._call_llm(prompt, is_json=False).strip()
-        
-        if code.startswith("```python"):
-            code = code[9:]
-        if code.startswith("```"):
-            code = code[3:]
-        if code.endswith("```"):
-            code = code[:-3]
-            
-        return code.strip()
+        Rule: {json.dumps(rule_text)}
+
+        Choose exactly one "kind":
+          "exact"             - values must be equal
+          "abs_tolerance"     - numbers may differ by at most "tolerance" (absolute)
+          "pct_tolerance"     - numbers may differ by at most "tolerance" percent of the source value
+          "ignore_case"       - text equal ignoring upper/lower case
+          "ignore_whitespace" - text equal ignoring spaces
+          "date_only"         - same calendar date, time of day ignored
+          "unsupported"       - none of the above can express the rule
+
+        Respond ONLY with JSON: {{"kind": "...", "tolerance": <number or null>}}
+        """
+        data = json.loads(_strip_fences(self._call_llm(prompt, is_json=True)))
+        if not isinstance(data, dict):
+            raise ValueError("Expected a JSON object")
+        if data.get("kind") == "unsupported":
+            raise ValueError("The model could not express this rule with the supported rule kinds")
+        return RuleSpec.model_validate(data)  # extra="forbid": any unexpected field is rejected
+
+
+def resolve_rules(config: ValidationConfig, agent: Optional[AIAgent]) -> Tuple[ValidationConfig, List[str]]:
+    """Fill in rule_spec for rules the deterministic parser can't read, using the AI.
+
+    Returns the updated config and human-readable notes. Rules the AI can't express
+    (or returns invalid output for) are left for the engines, which fall back to exact
+    match and warn.
+    """
+    notes: List[str] = []
+    mappings = []
+    for m in config.column_mappings:
+        if m.rule_spec is None and m.validation_rule:
+            _, warning = parse_rule(m.validation_rule)
+            if warning and agent is not None:
+                try:
+                    spec = agent.interpret_rule(m.validation_rule, m.file1_column, m.file2_column)
+                    m = m.model_copy(update={"rule_spec": spec})
+                    notes.append(f"{m.file1_column}: AI interpreted '{m.validation_rule}' as {spec.describe()}.")
+                except (ValueError, ValidationError, RuntimeError, json.JSONDecodeError) as e:
+                    notes.append(f"{m.file1_column}: AI could not interpret '{m.validation_rule}' ({e}).")
+        mappings.append(m)
+    return config.model_copy(update={"column_mappings": mappings}), notes
