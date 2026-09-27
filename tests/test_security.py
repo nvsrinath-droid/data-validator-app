@@ -44,13 +44,24 @@ def test_api_key_passed_per_call_not_via_environ(monkeypatch, model):
     assert calls[0]["model"] == model
 
 
-@pytest.mark.parametrize("model", [m for m, _ in AVAILABLE_MODELS.values()])
-def test_picker_models_are_current_in_litellm(model):
+DOC_MODELS = ["anthropic/claude-opus-5",   # README CLI example
+              "gemini/gemini-3.8-flash"]   # CLI default and .env.example
+
+
+@pytest.mark.parametrize("model", [m for m, _ in AVAILABLE_MODELS.values()] + DOC_MODELS)
+def test_models_are_recognised_by_litellm(model):
+    """Every model string we ship resolves in LiteLLM's model list with no retirement date."""
     import litellm
-    bare = model.split("/", 1)[1] if model.split("/", 1)[0] in ("openai", "anthropic", "cohere_chat") else model
-    info = litellm.model_cost.get(bare) or litellm.model_cost.get(model)
-    assert info, f"{model} is not in LiteLLM's model map"
+    info = litellm.get_model_info(model)  # raises if LiteLLM doesn't recognise the model
+    assert info.get("mode") == "chat"
     assert not info.get("deprecation_date"), f"{model} is scheduled for retirement"
+
+
+def test_doc_models_match_the_code():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "--model anthropic/claude-opus-5" in readme
+    assert "TRUEALIGN_MODEL=gemini/gemini-3.8-flash" in (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert '"gemini/gemini-3.8-flash"' in (ROOT / "main.py").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("model, temperature, json_mode", [
@@ -209,3 +220,38 @@ def test_gitignore_is_utf8_and_covers_secrets():
     assert b"\x00" not in raw  # the old file had a UTF-16 line
     lines = {line.strip() for line in raw.decode("utf-8").splitlines()}
     assert {".env", "users.db", "output/"} <= lines
+
+
+# ---- SQL Server ODBC driver ---------------------------------------------------------------------
+
+def _odbc_string(url) -> str:
+    """The ODBC connection string SQLAlchemy's pyodbc dialect would hand to pyodbc.connect()."""
+    from sqlalchemy.dialects.mssql.pyodbc import MSDialect_pyodbc
+    args, _ = MSDialect_pyodbc().create_connect_args(url)
+    return args[0]
+
+
+@pytest.mark.parametrize("driver", ["ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server"])
+@pytest.mark.parametrize("trust", [False, True])
+def test_mssql_url_for_each_driver(driver, trust):
+    url = build_url("Microsoft SQL Server", "sql.example.com", "1433", "JDE_PROD", "svc", NASTY_PASSWORD,
+                    mssql_driver=driver, trust_server_certificate=trust)
+    assert url.query["driver"] == driver
+    assert ("TrustServerCertificate" in url.query) is trust
+    odbc = _odbc_string(url)
+    assert f"DRIVER={{{driver}}}" in odbc
+    assert "Server=sql.example.com,1433" in odbc and "Database=JDE_PROD" in odbc
+    assert ("TrustServerCertificate=yes" in odbc) is trust
+    assert make_url(url.render_as_string(hide_password=False)).password == NASTY_PASSWORD
+
+
+@pytest.mark.parametrize("installed, expected", [
+    (["ODBC Driver 17 for SQL Server", "ODBC Driver 18 for SQL Server"], "ODBC Driver 18 for SQL Server"),
+    (["SQL Server", "ODBC Driver 17 for SQL Server"], "ODBC Driver 17 for SQL Server"),
+    ([], "ODBC Driver 18 for SQL Server"),
+])
+def test_mssql_driver_defaults_to_18_then_17(monkeypatch, installed, expected):
+    import core.db as db
+    monkeypatch.setattr(db, "installed_mssql_drivers", lambda: installed)
+    assert db.default_mssql_driver() == expected
+    assert build_url("Microsoft SQL Server", "h", "1433", "d", "u", "p").query["driver"] == expected

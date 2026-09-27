@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from ai.agent import AIAgent, resolve_rules
-from core.db import DB_TYPES, DEFAULT_PORTS, build_url
+from core.db import DB_TYPES, DEFAULT_PORTS, MSSQL_DRIVERS, build_url, default_mssql_driver, installed_mssql_drivers
 from core.sources import DataPair
 from core.templates import (RULE_COL, SOURCE_COL, TARGET_COL, config_from_grid, config_to_grid,
                             manual_config, read_template, template_bytes)
@@ -31,9 +31,21 @@ def render_connection_fields(key_prefix: str, label: str = "Database Type"):
     user = c3.text_input("Username", key=f"user_{key_prefix}")
     password = c4.text_input("Password", type="password", key=f"pass_{key_prefix}")
 
+    mssql = {}
+    if db_type == "Microsoft SQL Server":
+        c5, c6 = st.columns([3, 2])
+        drivers = list(dict.fromkeys(MSSQL_DRIVERS + installed_mssql_drivers()))
+        mssql["mssql_driver"] = c5.selectbox("ODBC Driver", drivers, index=drivers.index(default_mssql_driver()),
+                                             key=f"driver_{key_prefix}",
+                                             help="Driver 18 encrypts connections by default.")
+        c6.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
+        mssql["trust_server_certificate"] = c6.checkbox(
+            "Trust server certificate", key=f"trust_{key_prefix}",
+            help="Needed with Driver 18 when the server uses a self-signed certificate (common on-prem).")
+
     if host and db_name and user and password:
         try:
-            return build_url(db_type, host, port, db_name, user, password)
+            return build_url(db_type, host, port, db_name, user, password, **mssql)
         except ValueError:
             st.error("Port must be a number.")
     return None

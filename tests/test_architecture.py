@@ -191,3 +191,12 @@ def test_duckdb_reads_excel_without_extensions(tmp_path):
     pd.DataFrame({"ID": [1, 2], "Amt": ["100.00", "6"]}).to_csv(tgt, index=False)
     res = FilePair(str(src), str(tgt)).run(config(["ID"], ("Amt", "Amt")))
     assert (res.matched_rows, res.mismatched_rows) == (1, 1)
+
+
+def test_sql_server_form_offers_driver_and_certificate_options():
+    at = _app("pushdown").run()
+    at.selectbox(key="db_type_pd").select("Microsoft SQL Server").run()
+    assert not at.exception
+    driver = at.selectbox(key="driver_pd")
+    assert driver.options[:2] == ["ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server"]
+    assert at.checkbox(key="trust_pd").value is False

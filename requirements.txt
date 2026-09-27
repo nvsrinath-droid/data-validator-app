@@ -17,7 +17,7 @@ litellm>=1.50
 # Database drivers for the pushdown / SQL sources
 snowflake-sqlalchemy>=1.6
 oracledb>=2.0
-pyodbc>=5.0            # SQL Server; also needs the Microsoft ODBC Driver 17/18 installed on the host
+pyodbc>=5.0            # SQL Server; also install Microsoft ODBC Driver 18 (or 17) for SQL Server on the host
 psycopg2-binary>=2.9   # PostgreSQL
 
 # Tests
