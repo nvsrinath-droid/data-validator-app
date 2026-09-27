@@ -12,7 +12,7 @@ TrueAlign compares a *system of record* (source) against a *target* (a migrated 
 
 Sources can be CSV/Excel files or SQL queries against Snowflake, Oracle, SQL Server, PostgreSQL or SQLite.
 
-![Reconciliation results for the sample HR and payroll files: exact counts, mismatches per column, and tabs for each exception type](docs/screenshots/results.png)
+![Reconciliation results from a real Oracle run: exact counts, mismatches per column, and tabs for each exception type](docs/screenshots/results.png)
 
 ---
 
@@ -41,7 +41,7 @@ TrueAlign handles each of these the same way in every engine, and puts the compu
 
 ![Landing page: choose the engine tier that fits the data volume and source](docs/screenshots/landing.png)
 
-![Mapping grid for the sample inventory and vendor files: primary key, column pairs with different names, and plain-English validation rules](docs/screenshots/mapping.png)
+![AI-suggested mapping (Claude Sonnet 5) for JD Edwards-style source and target tables with different column names, plus plain-English validation rules](docs/screenshots/mapping.png)
 
 ## Architecture
 
@@ -221,6 +221,58 @@ The other test files cover the rest:
 
 - `tests/test_security.py`: API keys passed per call, no `exec`/`eval`, rejection of malicious LLM output, passwords with special characters, `.gitignore`.
 - `tests/test_architecture.py`: pushdown returns only exceptions and caps them, the CLI, templates, and headless [AppTest](https://docs.streamlit.io/develop/api-reference/app-testing) runs of all three tiers end to end.
+- `tests/test_oracle_kit.py`: the Oracle test kit below, run through all three engines.
+
+#### Testing against a real Oracle database
+
+`samples/oracle_test_setup.sql` creates two tables with one row per edge case:
+
+- `SRC_INVOICES`, JD Edwards style: space-padded `CHAR` keys and names, `NUMBER` amounts, `DATE` dates.
+- `TGT_INVOICES`, the migrated target: different column names, amounts stored as text, `TIMESTAMP` dates.
+
+1. Start Oracle Database Free in Docker, and wait until `docker logs oracle-free` shows `DATABASE IS READY TO USE!`:
+
+   ```bash
+   docker run -d --name oracle-free -p 1521:1521 -e ORACLE_PASSWORD=<admin password> -e APP_USER=validator -e APP_USER_PASSWORD='Test@1234#' gvenzl/oracle-free
+   ```
+
+2. Load the test data. The script ends by printing the row counts (11 and 12):
+
+   ```bash
+   docker cp samples/oracle_test_setup.sql oracle-free:/tmp/
+   docker exec oracle-free sqlplus -s /nolog "@/tmp/oracle_test_setup.sql"
+   ```
+
+3. In the app, open the **Enterprise SQL Warehouses** tier and connect with:
+
+   | Field | Value |
+   |---|---|
+   | SQL Dialect | Oracle |
+   | Host / Port | `localhost` / `1521` |
+   | Database Name | `FREEPDB1` |
+   | Username / Password | `validator` / the `APP_USER_PASSWORD` above |
+   | SQL Query 1 | `SELECT * FROM SRC_INVOICES` |
+   | SQL Query 2 | `SELECT * FROM TGT_INVOICES` |
+
+   Map the columns with AI or by hand, and set:
+   - Primary key: `INVOICE_NO`. Oracle column names show in lowercase in the app, as `invoice_no`.
+   - Rules: `within 1%` on `AMOUNT` and `ignore case` on `STATUS`.
+
+4. Expected result:
+
+   | Metric | Count | Rows |
+   |---|---|---|
+   | Source rows | 11 | |
+   | Target rows | 12 | |
+   | Matched | 6 | |
+   | Mismatched | 3 | `INV004` (NULL vs text remark), `INV006` (credit memo −500 vs −510, outside 1%), `INV009` (supplier name) |
+   | Missing in target | 1 | `INV010` |
+   | Missing in source | 1 | `INV011` |
+   | Duplicate keys | 1 | `INV012`, loaded twice in the target |
+
+> **Note:** the password `Test@1234#` in the script and the command above is a throwaway value for a local test container only. Don't reuse it anywhere else. (Its special characters also exercise the connection URL escaping.)
+
+`tests/test_oracle_kit.py` reads the rows straight from the same SQL script and asserts these exact counts on all three engines (pushdown on SQLite), so the expected results stay in sync with the code.
 
 ## Design decisions
 
@@ -256,7 +308,7 @@ tests/                 pytest suite
 
 ## Known limitations
 
-- The SQL for Oracle, SQL Server and Snowflake follows each database's documented syntax, but the automated suite only runs pushdown end to end against SQLite. For the other three, only the row-limit syntax is unit-tested. Validate against your own warehouse before relying on it for sign-off.
+- SQL pushdown has been validated end to end against Oracle Database Free (September 2026) with a JD Edwards-style test set covering CHAR padding, NULL handling, numeric type drift, DATE vs TIMESTAMP, percentage tolerance on negative amounts, duplicate keys and missing rows. Snowflake, SQL Server and PostgreSQL follow each database's documented syntax but are only tested against SQLite in the automated suite. Validate against your own warehouse before relying on it for sign-off.
 - Date detection covers ISO-8601 values. Other formats (for example `01/15/2024`, or JDE Julian dates) are compared as text unless converted in the source query.
 - Excel inputs on the DuckDB tier are read through pandas. Excel caps out at about 1M rows, so for anything larger export to CSV.
 
