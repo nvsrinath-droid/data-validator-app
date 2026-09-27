@@ -226,5 +226,7 @@ def test_mapping_grid_shows_rule_preview():
         "Validation Rule (Optional)": ["within 1", "within 1%", "ignore case"]})
     at.run()
     assert not at.exception
-    grid = at.get("arrow_data_frame")[0].value
+    # AppTest names the grid element "arrow_data_frame" before Streamlit 1.6x and "dataframe" after
+    frames = [el.value for el in [*at.get("arrow_data_frame"), *at.get("dataframe")]]
+    grid = next(f for f in frames if "Interpreted As" in getattr(f, "columns", []))
     assert list(grid["Interpreted As"]) == ["absolute ±1.00", "±1% of source", "exact, ignoring case"]
