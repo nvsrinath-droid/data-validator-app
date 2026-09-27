@@ -290,7 +290,7 @@ ERP migrations succeed or fail, and it's also where AI can help most
 without being trusted blindly: the model proposes mappings, and a
 deterministic, tested engine decides what reconciles.
 
-[LinkedIn](<LINKEDIN_URL>)
+[LinkedIn](<https://www.linkedin.com/in/vennanduri/>)
 
 ## License
 
