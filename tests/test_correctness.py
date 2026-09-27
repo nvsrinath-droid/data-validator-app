@@ -182,3 +182,16 @@ def test_unknown_column_is_a_clear_error(run, engine):
     df = pd.DataFrame({"ID": [1], "V": ["a"]})
     with pytest.raises(ValueError, match="not found"):
         run(engine, df, df, config(["ID"], ("Nope", "V")))
+
+
+def test_integer_values_are_not_shown_as_floats(run):
+    # Missing rows put NULLs in the joined result; that must not turn IDs like 1003 into 1003.0.
+    src = pd.DataFrame({"ID": [1003, 1004, 1005], "Salary": [71395, 50000, 60000]})
+    tgt = pd.DataFrame({"ID": [1003, 1004, 1006], "Salary": [66395, 50000, 60000]})
+    for engine in ENGINES:
+        res = run(engine, src, tgt, config(["ID"], ("Salary", "Salary", "within 1%")))
+        shown = res.mismatches.astype(str)
+        assert list(shown["ID"]) == ["1003"], engine
+        assert list(shown["Source Value"]) == ["71395"] and list(shown["Target Value"]) == ["66395"], engine
+        assert list(res.missing_in_target.astype(str)["ID"]) == ["1005"], engine
+        assert list(res.missing_in_source.astype(str)["ID"]) == ["1006"], engine

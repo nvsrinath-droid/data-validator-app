@@ -294,7 +294,9 @@ ta_j2 AS (SELECT ta_j.*, CASE WHEN {any_bad} > 0 THEN 1 ELSE 0 END AS xm FROM ta
 
         # Exceptions: one query, capped per category.
         _, rows = run(self.exceptions_sql(sample_limit))
-        ex = pd.DataFrame(rows, columns=["cat"] + self.j_columns)
+        # dtype=object keeps raw values as the database returned them; otherwise NULLs from the
+        # other side of the outer join would turn integer IDs into floats (1003 -> 1003.0)
+        ex = pd.DataFrame(rows, columns=["cat"] + self.j_columns, dtype=object)
         src_names = [k.source for k in plan.keys] + [c.source for c in plan.columns]
         tgt_names = [k.target for k in plan.keys] + [c.target for c in plan.columns]
         s_raw = [f"s_rk{i}" for i in range(nk)] + [f"s_r{i}" for i in range(nc)]
@@ -304,7 +306,7 @@ ta_j2 AS (SELECT ta_j.*, CASE WHEN {any_bad} > 0 THEN 1 ELSE 0 END AS xm FROM ta
         def side_frame(cat, raw, names):
             part = ex[ex["cat"] == cat]
             part = part.sort_values(order, kind="stable") if len(part) else part
-            return pd.DataFrame(part[raw].to_numpy(), columns=names)
+            return pd.DataFrame(part[raw].to_numpy(), columns=names).infer_objects()
 
         result.missing_in_target = side_frame("T", s_raw, src_names)
         result.missing_in_source = side_frame("S", t_raw, tgt_names)
@@ -319,7 +321,7 @@ ta_j2 AS (SELECT ta_j.*, CASE WHEN {any_bad} > 0 THEN 1 ELSE 0 END AS xm FROM ta
             for i, col in enumerate(plan.columns):
                 if int(row[f"x{i}"]) == 1:
                     records.append(keys + [col.label, row[f"s_r{i}"], row[f"t_r{i}"], rule_label(col), remark(col)])
-        result.mismatches = pd.DataFrame(records, columns=key_names + MISMATCH_COLUMNS)
+        result.mismatches = pd.DataFrame(records, columns=key_names + MISMATCH_COLUMNS).infer_objects()
 
         if result.duplicate_key_count:
             _, rows = run(self.duplicates_sql(sample_limit))
