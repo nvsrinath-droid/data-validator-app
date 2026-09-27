@@ -405,6 +405,69 @@ def reset_app():
         st.query_params["auth"] = current_auth
     st.rerun()
 
+def render_results(res, key_prefix: str, title: str = "📊 Validation Results"):
+    """Shared results view for every engine (all return a ComparisonResult)."""
+    from core.reporter import excel_report
+
+    st.subheader(title)
+    for w in res.warnings:
+        st.warning(w)
+
+    k = st.columns(4)
+    k[0].metric("Source Rows", f"{res.total_source:,}")
+    k[1].metric("Target Rows", f"{res.total_target:,}")
+    k[2].metric("Matched Rows", f"{res.matched_rows:,}")
+    k[3].metric("Mismatched Rows", f"{res.mismatched_rows:,}")
+    k = st.columns(4)
+    k[0].metric("Missing in Target", f"{res.missing_in_target_count:,}")
+    k[1].metric("Missing in Source", f"{res.missing_in_source_count:,}")
+    k[2].metric("Duplicate Keys", f"{res.duplicate_key_count:,}")
+    k[3].metric("Row Count Difference", f"{res.total_source - res.total_target:,}")
+
+    if res.truncated:
+        st.info("Row-level detail below is a capped sample; the counts above are exact.")
+
+    if any(res.mismatches_by_column.values()):
+        by_col = pd.DataFrame(
+            [(c, n) for c, n in res.mismatches_by_column.items() if n], columns=["Column", "Mismatched Rows"])
+        st.dataframe(by_col, use_container_width=True, hide_index=True)
+
+    def to_excel(df, sheet_name):
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
+        return buffer.getvalue()
+
+    def section(df, base_name, empty_msg, key):
+        if df is None or df.empty:
+            st.success(empty_msg)
+            return
+        st.dataframe(df.astype(str), use_container_width=True, hide_index=True)
+        c1, c2 = st.columns(2)
+        c1.download_button(f"📥 {base_name} (CSV)", df.to_csv(index=False).encode('utf-8'),
+                           file_name=f"{base_name}.csv", mime="text/csv", key=f"{key}_csv", use_container_width=True)
+        c2.download_button(f"📊 {base_name} (Excel)", to_excel(df, base_name), file_name=f"{base_name}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           key=f"{key}_xl", use_container_width=True)
+
+    t1, t2, t3, t4 = st.tabs(["📝 Mismatched Values", "❌ Missing in Target", "❌ Missing in Source", "♊ Duplicate Keys"])
+    with t1:
+        section(res.mismatches, "Mismatches", "No data mismatches found!", f"{key_prefix}_mm")
+    with t2:
+        st.caption("Rows in the source (system of record) with no matching key in the target.")
+        section(res.missing_in_target, "Missing_in_Target", "Every source row exists in the target.", f"{key_prefix}_mt")
+    with t3:
+        st.caption("Rows in the target with no matching key in the source.")
+        section(res.missing_in_source, "Missing_in_Source", "Every target row exists in the source.", f"{key_prefix}_ms")
+    with t4:
+        st.caption("Keys that appear more than once on a side. They are excluded from matching.")
+        section(res.duplicate_keys, "Duplicate_Keys", "No duplicate primary keys.", f"{key_prefix}_dk")
+
+    st.download_button("📥 Download Full Exceptions Report (Excel)", excel_report(res),
+                       file_name="TrueAlign_Validation_Report.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       type="primary", use_container_width=True, key=f"{key_prefix}_full")
+
 # We use session state to hold the AI's configuration so it doesn't regenerate on every button click
 if 'ai_config' not in st.session_state:
     st.session_state.ai_config = None
@@ -818,7 +881,6 @@ if st.session_state.execution_tier == "standard":
                 with st.spinner('Comparing all rows...'):
                     # Rebuild config object from the UI edited state, safely dropping empty/deleted rows
                     new_mappings = []
-                    rules_dict = {}
                     for index, row in edited_mapping_df.iterrows():
                         c1_raw = row.get('File 1 Column')
                         c2_raw = row.get('File 2 Column')
@@ -833,8 +895,6 @@ if st.session_state.execution_tier == "standard":
                         # Only map if both columns are provided and not NaN
                         if c1 and c2 and c1.lower() != 'nan' and c2.lower() != 'nan' and c1 != 'None' and c2 != 'None':
                             new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule else None))
-                            if rule:
-                                rules_dict[c1] = rule
                 
                     final_config = ValidationConfig(
                         primary_keys=pk_cols,
@@ -842,110 +902,18 @@ if st.session_state.execution_tier == "standard":
                         ignore_columns=[]
                     )
                 
-                    # Execute AI Logic if rules exist
-                    rule_code = None
-                    if rules_dict:
-                        st.toast(f"Generating custom validation rules with {selected_model_display}...", icon='🧠')
-                        agent = AIAgent(model_name=litellm_model_str, api_key=active_api_key)
-                        rule_code = agent.generate_rule_evaluator_code(rules_dict)
-                
                     # Execute Core Logic
-                    comparator = DataComparator(final_config, rule_code=rule_code)
-                    st.session_state.df1_full = conn1.read_data()
-                    st.session_state.df2_full = conn2.read_data()
-                    st.session_state.results = comparator.compare(st.session_state.df1_full, st.session_state.df2_full)
-                
-                    st.toast('Comparison Complete!', icon='🎉')
-                
+                    try:
+                        comparator = DataComparator(final_config)
+                        st.session_state.results = comparator.compare(conn1.read_data(), conn2.read_data())
+                        st.toast('Comparison Complete!', icon='🎉')
+                    except ValueError as e:
+                        st.error(str(e))
+
             # --- Step 4: Display Results & Downloads ---
             if st.session_state.get('results'):
-                results = st.session_state.results
-                df1_full = st.session_state.df1_full
-                df2_full = st.session_state.df2_full
-            
-                st.subheader("📊 Validation Results")
-            
-                # Feature: High Level Metric Summary
-                st.markdown("### Record Counts & Summary")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("File 1 Total Rows", f"{len(df1_full):,}")
-                m2.metric("File 2 Total Rows", f"{len(df2_full):,}")
-            
-                # Optional: Grand Totals for matching numeric columns
-                total_diff = len(df1_full) - len(df2_full)
-                m3.metric("Row Count Difference", f"{total_diff:,}", delta=total_diff, delta_color="inverse")
-            
-                st.markdown("---")
-            
-                st.markdown("### Detailed Exceptions")
-            
-                def get_flattened_mismatches_df(mismatches_list):
-                    flat_data = []
-                    for item in mismatches_list:
-                        pk_str = str(item["primary_keys"])
-                        for diff in item["differences"]:
-                            flat_data.append({
-                                "Primary Key": pk_str,
-                                "Column": diff["column"],
-                                "File 1 Value": diff["file1_value"],
-                                "File 2 Value": diff["file2_value"],
-                                "Validation Rule": diff.get("validation_rule", ""),
-                                "Remarks": diff.get("error", "Exact match failed")
-                            })
-                    return pd.DataFrame(flat_data)
+                render_results(st.session_state.results, "std")
 
-                # We need a helper to generate Excel strings for download
-                def to_excel_download(df, sheet_name="Data"):
-                    buffer = io.BytesIO()
-                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                        df.to_excel(writer, index=False, sheet_name=sheet_name)
-                    return buffer.getvalue()
-
-                # Create tabs for clean viewing
-                tab1, tab2, tab3 = st.tabs(["Mismatched Values", "Missing in Source", "Missing in Target"])
-            
-                with tab1:
-                    mismatches = results.get('mismatches', [])
-                    st.metric("Total Mismatched Rows", len(mismatches))
-                    if mismatches:
-                        flat_df = get_flattened_mismatches_df(mismatches)
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            csv_data = flat_df.to_csv(index=False).encode('utf-8')
-                            st.download_button("Download Mismatches (CSV)", data=csv_data, file_name="mismatches.csv", mime="text/csv", use_container_width=True)
-                        with c2:
-                            excel_data = to_excel_download(flat_df, "Mismatches")
-                            st.download_button("Download Mismatches (Excel)", data=excel_data, file_name="mismatches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                        st.dataframe(flat_df.astype(str)) # Easy viewer
-            
-                with tab2:
-                     missing_f1 = results.get('missing_in_file1', [])
-                     st.metric("Total Rows Missing in Source File", len(missing_f1))
-                     if missing_f1:
-                         df_miss1 = pd.DataFrame(missing_f1)
-                         c1, c2 = st.columns(2)
-                         with c1:
-                             csv_data = df_miss1.to_csv(index=False).encode('utf-8')
-                             st.download_button("Download Missing (Source) (CSV)", data=csv_data, file_name="missing_source.csv", mime="text/csv", use_container_width=True)
-                         with c2:
-                             excel_data = to_excel_download(df_miss1, "Missing Source")
-                             st.download_button("Download Missing (Source) (Excel)", data=excel_data, file_name="missing_source.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                         st.dataframe(df_miss1)
-                     
-                with tab3:
-                     missing_f2 = results.get('missing_in_file2', [])
-                     st.metric("Total Rows Missing in Target File", len(missing_f2))
-                     if missing_f2:
-                         df_miss2 = pd.DataFrame(missing_f2)
-                         c1, c2 = st.columns(2)
-                         with c1:
-                             csv_data = df_miss2.to_csv(index=False).encode('utf-8')
-                             st.download_button("Download Missing (Target) (CSV)", data=csv_data, file_name="missing_target.csv", mime="text/csv", use_container_width=True)
-                         with c2:
-                             excel_data = to_excel_download(df_miss2, "Missing Target")
-                             st.download_button("Download Missing (Target) (Excel)", data=excel_data, file_name="missing_target.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                         st.dataframe(df_miss2)
-            
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🔄 Restart Validation", use_container_width=True):
             reset_app()
@@ -1107,14 +1075,14 @@ elif st.session_state.execution_tier == "heavy":
             config = st.session_state.ai_config
             f1_path, f2_path = st.session_state.heavy_files
             
-            # Re-read headers for the dropdown options
-            import duckdb
-            duckdb.execute("INSTALL spatial; LOAD spatial;")
-            def get_duck_read(path: str) -> str:
-                return f"st_read('{path}')" if path.lower().endswith(('.xls', '.xlsx')) else f"read_csv_auto('{path}')"
-                
-            f1_cols = [""] + duckdb.query(f"SELECT * FROM {get_duck_read(f1_path)} LIMIT 1").df().columns.tolist()
-            f2_cols = [""] + duckdb.query(f"SELECT * FROM {get_duck_read(f2_path)} LIMIT 1").df().columns.tolist()
+            # Re-read headers for the dropdown options (header row only, no full load)
+            def read_header(path: str) -> list:
+                if path.lower().endswith(('.xls', '.xlsx')):
+                    return pd.read_excel(path, nrows=0).columns.tolist()
+                return pd.read_csv(path, nrows=0).columns.tolist()
+
+            f1_cols = [""] + read_header(f1_path)
+            f2_cols = [""] + read_header(f2_path)
             
             if st.session_state.get("is_h_template_loaded", False):
                 st.write("Review your loaded Template mappings before running the final Heavy comparison:")
@@ -1162,78 +1130,27 @@ elif st.session_state.execution_tier == "heavy":
             if st.button("🚀 Run Heavy File Comparison (Disk Streaming)", type="primary", use_container_width=True, key="h_run"):
                 with st.spinner('Piping massive files to DuckDB analytic engine...'):
                     new_mappings = []
-                    rules_dict = {}
                     for index, row in edited_mapping_df.iterrows():
-                        c1, c2, rule = str(row.get('File 1 Column')), str(row.get('File 2 Column')), str(row.get('Validation Rule (Optional)'))
-                        if c1 and c2 and c1 != 'None' and c2 != 'None' and c1 != 'nan':
-                            new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule != 'nan' else None))
-                            if rule and rule != 'nan':
-                                rules_dict[c1] = rule
+                        c1, c2, rule = (str(row.get(k) or '').strip() for k in ('File 1 Column', 'File 2 Column', 'Validation Rule (Optional)'))
+                        rule = '' if rule.lower() in ('none', 'nan') else rule
+                        if c1 and c2 and c1.lower() not in ('none', 'nan') and c2.lower() not in ('none', 'nan'):
+                            new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule or None))
                     
                     final_config = ValidationConfig(primary_keys=pk_cols, column_mappings=new_mappings)
                     
                     from core.engines.duckdb_engine import DuckDBEngine
-                    heavy_engine = DuckDBEngine(final_config, rules_dict=rules_dict)
+                    heavy_engine = DuckDBEngine(final_config)
                     
                     try:
                         st.session_state.results = heavy_engine.compare(f1_path, f2_path)
                         st.toast('Massive Comparison Complete!', icon='🐘')
-                        
-                        st.session_state.heavy_files = None
                     except Exception as e:
                         st.error(f"DuckDB Query Failed: {str(e)}")
                         
             # Results UI
-            if 'results' in st.session_state:
-                res = st.session_state.results
-                total1, total2 = res.get('Total Rows File 1', 0), res.get('Total Rows File 2', 0)
-                mismatches = len(res.get('Data Mismatches', []))
-                
-                st.subheader("📊 Heavy Validation Results")
-                k1, k2, k3, k4, k5 = st.columns(5)
-                k1.metric("Total Rows (File 1)", f"{total1:,}")
-                k2.metric("Total Rows (File 2)", f"{total2:,}")
-                k3.metric("Exact Matches", f"{len(res.get('Exact Matches', [])):,}")
-                k4.metric("Missing Rows", f"{(len(res.get('Missing in File 1 (Found in 2)', [])) + len(res.get('Missing in File 2 (Found in 1)', []))):,}")
-                k5.metric("Data Mismatches", f"{mismatches:,}")
-                
-                import io
-                def to_excel_download(df, sheet_name="Data"):
-                    buffer = io.BytesIO()
-                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                        df.to_excel(writer, sheet_name=sheet_name, index=False)
-                    return buffer.getvalue()
+            if st.session_state.get('results'):
+                render_results(st.session_state.results, "heavy", "📊 Heavy Validation Results")
 
-                def render_downloads(df, base_name, key_prefix):
-                    if type(df) == list: df = pd.DataFrame(df)
-                    if df is None or df.empty: return
-                    c1, c2 = st.columns(2)
-                    c1.download_button(f"📥 Download {base_name} (CSV)", df.to_csv(index=False), file_name=f"{base_name}.csv", mime="text/csv", key=f"{key_prefix}_csv", use_container_width=True)
-                    c2.download_button(f"📊 Download {base_name} (Excel)", to_excel_download(df, base_name), file_name=f"{base_name}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"{key_prefix}_xl", use_container_width=True)
-
-                t1, t2, t3, t4 = st.tabs(["📝 Mismatch Report", "❌ Missing in File 1", "❌ Missing in File 2", "✅ Exact Matches"])
-                with t1:
-                    st.markdown("### Missing Attributes and Differences")
-                    if mismatches > 0: 
-                        st.dataframe(pd.DataFrame(res.get('Mismatch Breakdown', [])), use_container_width=True)
-                        render_downloads(res.get('Mismatch Breakdown', []), "Mismatch_Report", "h_t1")
-                    else: st.success("No data mismatches found!")
-                    
-                with t2: 
-                    st.markdown("### Rows missing in Target mapped system")
-                    st.dataframe(res.get('Missing in File 1 (Found in 2)', pd.DataFrame()), use_container_width=True)
-                    render_downloads(res.get('Missing in File 1 (Found in 2)', pd.DataFrame()), "Missing_in_Target", "h_t2")
-                    
-                with t3: 
-                    st.markdown("### Extra/Orphaned rows present in Target system")
-                    st.dataframe(res.get('Missing in File 2 (Found in 1)', pd.DataFrame()), use_container_width=True)
-                    render_downloads(res.get('Missing in File 2 (Found in 1)', pd.DataFrame()), "Missing_in_Source", "h_t3")
-                    
-                with t4: 
-                    st.markdown("### Exact Validated Matches")
-                    st.dataframe(res.get('Exact Matches', pd.DataFrame()), use_container_width=True)
-                    render_downloads(res.get('Exact Matches', pd.DataFrame()), "Exact_Matches", "h_t4")
-                
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("🔄 Restart Validation", use_container_width=True, key="h_reset"):
                     reset_app()
@@ -1386,18 +1303,16 @@ elif st.session_state.execution_tier == "pushdown":
                     
                 with st.spinner('Translating AI rules into SQL and pushing the execution query down to the remote database...'):
                     new_mappings = []
-                    rules_dict = {}
                     for index, row in edited_mapping_df.iterrows():
-                        c1, c2, rule = str(row.get('File 1 Column')), str(row.get('File 2 Column')), str(row.get('Validation Rule (Optional)'))
-                        if c1 and c2 and c1 != 'None' and c2 != 'None' and c1 != 'nan':
-                            new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule if rule != 'nan' else None))
-                            if rule and rule != 'nan':
-                                rules_dict[c1] = rule
+                        c1, c2, rule = (str(row.get(k) or '').strip() for k in ('File 1 Column', 'File 2 Column', 'Validation Rule (Optional)'))
+                        rule = '' if rule.lower() in ('none', 'nan') else rule
+                        if c1 and c2 and c1.lower() not in ('none', 'nan') and c2.lower() not in ('none', 'nan'):
+                            new_mappings.append(ColumnMap(file1_column=c1, file2_column=c2, validation_rule=rule or None))
                     
                     final_config = ValidationConfig(primary_keys=pk_cols, column_mappings=new_mappings)
                     
                     from core.engines.sql_pushdown import SQLPushdownEngine
-                    pushdown_engine = SQLPushdownEngine(final_config, rules_dict=rules_dict)
+                    pushdown_engine = SQLPushdownEngine(final_config)
                     
                     try:
                         st.session_state.results = pushdown_engine.compare(conn_str_pd, pd_q1, pd_q2)
@@ -1406,40 +1321,9 @@ elif st.session_state.execution_tier == "pushdown":
                         st.error(f"Remote Execution Failed: {str(e)}")
                         
             # Results UI
-            if 'results' in st.session_state:
-                res = st.session_state.results
-                total1, total2 = res.get('Total Rows File 1', 0), res.get('Total Rows File 2', 0)
-                mismatches = len(res.get('Data Mismatches', []))
-                
-                st.subheader("📊 Remote Database Execution Results")
-                k1, k2, k3, k4, k5 = st.columns(5)
-                k1.metric("Rows Scanned (Query 1)", f"{total1:,}")
-                k2.metric("Rows Scanned (Query 2)", f"{total2:,}")
-                k3.metric("Exact Matches", f"{len(res.get('Exact Matches', [])):,}")
-                k4.metric("Missing Rows", f"{(len(res.get('Missing in File 1 (Found in 2)', [])) + len(res.get('Missing in File 2 (Found in 1)', []))):,}")
-                k5.metric("Data Mismatches", f"{mismatches:,}")
-                
-                t1, t2, t3, t4 = st.tabs(["📝 Mismatch Report", "❌ Missing in 1", "❌ Missing in 2", "✅ Exact Matches"])
-                with t1:
-                    if mismatches > 0: st.dataframe(pd.DataFrame(res.get('Mismatch Breakdown', [])), use_container_width=True)
-                    else: st.success("No validation errors found!")
-                with t2: st.dataframe(res.get('Missing in File 1 (Found in 2)', pd.DataFrame()), use_container_width=True)
-                with t3: st.dataframe(res.get('Missing in File 2 (Found in 1)', pd.DataFrame()), use_container_width=True)
-                with t4: st.dataframe(res.get('Exact Matches', pd.DataFrame()), use_container_width=True)
-                
-                from core.reporter import ExcelReporter
-                reporter = ExcelReporter()
-                excel_bytes = reporter.generate_excel_report(res)
-                st.download_button(
-                    label="📥 Download Exceptions Report (Excel)",
-                    data=excel_bytes,
-                    file_name="TrueAlign_DB_Audit.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    type="primary",
-                    use_container_width=True,
-                    key="pd_excel"
-                )
-                
+            if st.session_state.get('results'):
+                render_results(st.session_state.results, "pd", "📊 Remote Database Execution Results")
+
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("🔄 Start New Validation (Bottom)", use_container_width=True, key="pd_reset"):
                     reset_app()
