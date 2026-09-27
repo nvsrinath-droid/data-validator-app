@@ -5,6 +5,7 @@ joining, comparing, counting) runs where the data lives. Only aggregate counts
 and a capped sample of exceptions ever leave the database.
 
 Query shape (CTEs):
+  (CTE names are prefixed ta_ so they can't collide with the user's own table names)
   src / tgt      normalized keys (k*), normalized values (n*), raw values (rk*, r*), presence flag p
   src_d / tgt_d  keys that occur more than once on that side
   dk             union of duplicated keys; excluded from the join on both sides
@@ -229,17 +230,17 @@ class SQLComparison:
             select.append(f"CASE WHEN s.p IS NULL OR t.p IS NULL THEN 0 "
                           f"WHEN {self._match(f's.n{i}', f't.n{i}', c)} THEN 0 ELSE 1 END AS x{i}")
         any_bad = " + ".join(f"x{i}" for i in range(nc)) or "0"
-        not_dup = lambda alias: f"NOT EXISTS (SELECT 1 FROM dk WHERE {self._keys_eq('dk', alias)})"
+        not_dup = lambda alias: f"NOT EXISTS (SELECT 1 FROM ta_dk WHERE {self._keys_eq('ta_dk', alias)})"
         return f"""WITH
-src AS ({self._side_cte(self.source_rel, 'source')}),
-tgt AS ({self._side_cte(self.target_rel, 'target')}),
-src_d AS (SELECT {keys}, COUNT(*) AS c FROM src GROUP BY {keys} HAVING COUNT(*) > 1),
-tgt_d AS (SELECT {keys}, COUNT(*) AS c FROM tgt GROUP BY {keys} HAVING COUNT(*) > 1),
-dk AS (SELECT {keys} FROM src_d UNION SELECT {keys} FROM tgt_d),
-src_u AS (SELECT s.* FROM src s WHERE {not_dup('s')}),
-tgt_u AS (SELECT t.* FROM tgt t WHERE {not_dup('t')}),
-j AS (SELECT {', '.join(select)} FROM src_u s FULL OUTER JOIN tgt_u t ON {self._keys_eq('s', 't')}),
-j2 AS (SELECT j.*, CASE WHEN {any_bad} > 0 THEN 1 ELSE 0 END AS xm FROM j)
+ta_src AS ({self._side_cte(self.source_rel, 'source')}),
+ta_tgt AS ({self._side_cte(self.target_rel, 'target')}),
+ta_src_d AS (SELECT {keys}, COUNT(*) AS c FROM ta_src GROUP BY {keys} HAVING COUNT(*) > 1),
+ta_tgt_d AS (SELECT {keys}, COUNT(*) AS c FROM ta_tgt GROUP BY {keys} HAVING COUNT(*) > 1),
+ta_dk AS (SELECT {keys} FROM ta_src_d UNION SELECT {keys} FROM ta_tgt_d),
+ta_src_u AS (SELECT s.* FROM ta_src s WHERE {not_dup('s')}),
+ta_tgt_u AS (SELECT t.* FROM ta_tgt t WHERE {not_dup('t')}),
+ta_j AS (SELECT {', '.join(select)} FROM ta_src_u s FULL OUTER JOIN ta_tgt_u t ON {self._keys_eq('s', 't')}),
+ta_j2 AS (SELECT ta_j.*, CASE WHEN {any_bad} > 0 THEN 1 ELSE 0 END AS xm FROM ta_j)
 """
 
     def counts_sql(self) -> str:
@@ -251,32 +252,32 @@ j2 AS (SELECT j.*, CASE WHEN {any_bad} > 0 THEN 1 ELSE 0 END AS xm FROM j)
                 f"SUM(CASE WHEN {both} AND xm = 0 THEN 1 ELSE 0 END) AS good"]
         aggs += [f"SUM(x{i}) AS cx{i}" for i in range(nc)]
         return (self.ctes() + "SELECT a.cs, b.ct, c.cd, d.* FROM "
-                "(SELECT COUNT(*) AS cs FROM src) a "
-                "CROSS JOIN (SELECT COUNT(*) AS ct FROM tgt) b "
-                "CROSS JOIN (SELECT COUNT(*) AS cd FROM dk) c "
-                f"CROSS JOIN (SELECT {', '.join(aggs)} FROM j2) d")
+                "(SELECT COUNT(*) AS cs FROM ta_src) a "
+                "CROSS JOIN (SELECT COUNT(*) AS ct FROM ta_tgt) b "
+                "CROSS JOIN (SELECT COUNT(*) AS cd FROM ta_dk) c "
+                f"CROSS JOIN (SELECT {', '.join(aggs)} FROM ta_j2) d")
 
     def exceptions_sql(self, limit: Optional[int]) -> str:
         cols = ", ".join(self.j_columns)
-        ex = (f"ex AS (SELECT 'T' AS cat, {cols} FROM j2 WHERE tp IS NULL "
-              f"UNION ALL SELECT 'S' AS cat, {cols} FROM j2 WHERE sp IS NULL "
-              f"UNION ALL SELECT 'M' AS cat, {cols} FROM j2 WHERE sp IS NOT NULL AND tp IS NOT NULL AND xm = 1)")
-        return self._ranked(ex, "cat", ["cat"] + self.j_columns,
+        ta_ex = (f"ta_ex AS (SELECT 'T' AS cat, {cols} FROM ta_j2 WHERE tp IS NULL "
+              f"UNION ALL SELECT 'S' AS cat, {cols} FROM ta_j2 WHERE sp IS NULL "
+              f"UNION ALL SELECT 'M' AS cat, {cols} FROM ta_j2 WHERE sp IS NOT NULL AND tp IS NOT NULL AND xm = 1)")
+        return self._ranked(ta_ex, "cat", ["cat"] + self.j_columns,
                             [f"s_k{i}" for i in range(len(self.plan.keys))], limit)
 
     def duplicates_sql(self, limit: Optional[int]) -> str:
         keys = self._key_list
-        dups = (f"ex AS (SELECT 'Source' AS side, {keys}, c FROM src_d "
-                f"UNION ALL SELECT 'Target' AS side, {keys}, c FROM tgt_d)")
+        dups = (f"ta_ex AS (SELECT 'Source' AS side, {keys}, c FROM ta_src_d "
+                f"UNION ALL SELECT 'Target' AS side, {keys}, c FROM ta_tgt_d)")
         key_cols = [f"k{i}" for i in range(len(self.plan.keys))]
         return self._ranked(dups, "side", ["side"] + key_cols + ["c"], key_cols, limit)
 
     def _ranked(self, ex_cte: str, part: str, cols: List[str], order: List[str], limit: Optional[int]) -> str:
         sql = self.ctes() + ", " + ex_cte + " "
         if limit is None:
-            return sql + f"SELECT {', '.join(cols)} FROM ex"
-        return (sql + f", ranked AS (SELECT ex.*, ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {', '.join(order)}) AS rn FROM ex) "
-                f"SELECT {', '.join(cols)} FROM ranked WHERE rn <= {int(limit)}")
+            return sql + f"SELECT {', '.join(cols)} FROM ta_ex"
+        return (sql + f", ta_ranked AS (SELECT ta_ex.*, ROW_NUMBER() OVER (PARTITION BY {part} ORDER BY {', '.join(order)}) AS rn FROM ta_ex) "
+                f"SELECT {', '.join(cols)} FROM ta_ranked WHERE rn <= {int(limit)}")
 
     # ---- execution ----------------------------------------------------------
     def run(self, run: RunFn, sample_limit: Optional[int]) -> ComparisonResult:

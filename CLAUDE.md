@@ -22,7 +22,7 @@ interpret plain-English validation rules such as "within 0.01" or "ignore case".
 python -m venv venv && venv\Scripts\activate     # Windows (source venv/bin/activate elsewhere)
 pip install -r requirements.txt
 streamlit run app.py                             # web UI on http://localhost:8501
-python main.py file1.csv file2.csv --config config.json   # CLI, pandas engine
+python main.py samples/inventory_system.csv samples/vendor_catalog.csv --config samples/inventory_config.json [--engine duckdb]
 pytest                                           # full suite
 pytest tests/test_file.py::test_name -q          # single test
 ```
@@ -41,13 +41,28 @@ The Streamlit UI picks an engine by "tier":
 
 The core invariant: **all three engines must produce the same answer for the same data and config**
 (NULL handling, numeric/string/date normalization, tolerance rules, duplicate keys, missing rows).
-Any change to comparison semantics must be made in every engine and covered by tests that run the
-same fixture through all three.
+`tests/test_correctness.py` runs every scenario through all three engines (`run_all`); add new semantics there.
 
-- `ai/agent.py` `AIAgent` wraps LiteLLM for config suggestion and rule interpretation. API keys are
-  per-user (held in Streamlit session state) and must be passed per call, never written to `os.environ`.
-- `connectors/` provides `FileConnector` / `SQLConnector` (read full data or a sample) for the pandas engine.
-- `core/auth.py` is a local SQLite + bcrypt user store (`users.db`); guests can use the app but cannot
-  load/save mapping templates.
-- Mapping templates are Excel/CSV files with columns `File 1 Column`, `File 2 Column`,
+How the engines share semantics:
+- `core/plan.py` `build_plan()` resolves a config against the real columns into key/column pairs, each with a
+  `Kind` (`core/normalize.py`: numeric / date / string, inferred from a sample) and a `RuleSpec`
+  (`core/rules.py`). Every engine builds its plan this way, so they agree on what is compared and how.
+- The pandas engine renders the plan with pandas; DuckDB and pushdown share `core/engines/sql_builder.py`,
+  which renders it as SQL per `Dialect` (null-safe equality, casts and row limits differ per database).
+  Only counts and a capped sample of exceptions leave the database.
+- Every engine returns `core/results.py` `ComparisonResult`.
+- Rules are data, never code: plain-English rules are parsed into a `RuleSpec`; the LLM may only return
+  a `RuleSpec` JSON object (validated, extra fields rejected). Do not reintroduce exec/eval.
+
+Other pieces:
+- `core/sources.py`: one adapter per tier (`ConnectorPair`, `FilePair`, `PushdownPair`) with
+  columns/sample/run; used by both the UI and `main.py`.
+- `ui/`: `app.py` only routes. `ui/components.py` holds the shared connection form and the
+  map -> run -> results workflow; `ui/pages/*.py` only collect each tier's inputs.
+- `ai/agent.py` `AIAgent` wraps LiteLLM. API keys are per user (Streamlit session state) and are passed
+  to each `completion()` call; never write them to `os.environ`.
+- `core/db.py` builds connection URLs with `URL.create()` (special-character passwords, masked in errors).
+- `core/auth.py` is a local SQLite + bcrypt user store (`users.db`); guests cannot load/save templates.
+- Mapping templates (`core/templates.py`) are Excel/CSV with columns `File 1 Column`, `File 2 Column`,
   `Validation Rule (Optional)`, `Is Primary Key`.
+- `samples/` has demo CSVs, a SQLite db and the scripts that generate them.

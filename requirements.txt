@@ -1,9 +1,24 @@
-streamlit
-pandas
-google-genai
-python-dotenv
-openpyxl
-sqlalchemy
-litellm
-duckdb
-bcrypt
+# App
+streamlit>=1.50
+pandas>=2.2
+numpy>=1.26
+openpyxl>=3.1
+python-dotenv>=1.0
+bcrypt>=4.0
+pydantic>=2.7
+
+# Engines
+duckdb>=1.1
+sqlalchemy>=2.0
+
+# AI mapping (any LiteLLM-supported provider)
+litellm>=1.50
+
+# Database drivers for the pushdown / SQL sources
+snowflake-sqlalchemy>=1.6
+oracledb>=2.0
+pyodbc>=5.0            # SQL Server; also needs the Microsoft ODBC Driver 17/18 installed on the host
+psycopg2-binary>=2.9   # PostgreSQL
+
+# Tests
+pytest>=8.0

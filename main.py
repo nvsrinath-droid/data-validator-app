@@ -1,107 +1,113 @@
+"""Command-line reconciliation.
+
+    python main.py source.csv target.csv --config config.json
+    python main.py source.csv target.csv --model gemini/gemini-2.5-flash --auto   # AI-suggested mapping
+    python main.py big_source.csv big_target.csv --config config.json --engine duckdb
+
+Exits 0 when the files reconcile, 1 when exceptions were found, 2 on errors, so it can gate a pipeline.
+"""
 import argparse
-import os
 import json
+import os
+import sys
+
 from dotenv import load_dotenv
 
-# Load environment variables (e.g., GEMINI_API_KEY)
-load_dotenv()
-
+from ai.agent import AIAgent, resolve_rules
 from connectors.file_connector import FileConnector
-from ai.agent import GeminiAgent
-from core.schemas import ValidationConfig
-from core.comparator import DataComparator
 from core.reporter import Reporter
+from core.schemas import ValidationConfig
+from core.sources import ConnectorPair, FilePair
 
-def main():
-    parser = argparse.ArgumentParser(description="AI-Powered Data Validation Agent")
-    parser.add_argument("file1", help="Path to File 1 (Source of Truth)")
-    parser.add_argument("file2", help="Path to File 2 (External File to Compare)")
-    parser.add_argument("--config", help="Optional path to an existing config.json file to bypass the LLM step", default=None)
-    parser.add_argument("--auto", action="store_true", help="Automatically accept AI suggestions without prompting")
+PROVIDER_KEY_VARS = {"gemini": "GEMINI_API_KEY", "gpt": "OPENAI_API_KEY", "o1": "OPENAI_API_KEY",
+                     "claude": "ANTHROPIC_API_KEY", "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY",
+                     "command": "COHERE_API_KEY"}
+
+
+def api_key_for(model: str) -> str:
+    for hint, var in PROVIDER_KEY_VARS.items():
+        if hint in model.lower():
+            return os.environ.get(var, "")
+    return ""
+
+
+def main() -> int:
+    load_dotenv()
+    parser = argparse.ArgumentParser(description="TrueAlign data reconciliation (CLI)")
+    parser.add_argument("file1", help="Path to the source file (system of record)")
+    parser.add_argument("file2", help="Path to the target file to compare")
+    parser.add_argument("--config", help="Path to a config JSON (skips the AI mapping step)")
+    parser.add_argument("--engine", choices=["pandas", "duckdb"], default="pandas",
+                        help="pandas (in memory) or duckdb (large files, streamed from disk)")
+    parser.add_argument("--model", default=os.environ.get("TRUEALIGN_MODEL", "gemini/gemini-2.5-flash"),
+                        help="LiteLLM model string for AI mapping / rule interpretation")
+    parser.add_argument("--api-key", help="API key for --model (default: the provider's *_API_KEY env var)")
+    parser.add_argument("--auto", action="store_true", help="Accept the AI-suggested mapping without prompting")
+    parser.add_argument("--output", default="output", help="Directory for the reports")
     args = parser.parse_args()
 
-    print(f"Initializing Data Validator on:\n - File 1: {args.file1}\n - File 2: {args.file2}\n")
+    pair = (FilePair(args.file1, args.file2) if args.engine == "duckdb"
+            else ConnectorPair(FileConnector(args.file1), FileConnector(args.file2)))
+    api_key = args.api_key or api_key_for(args.model)
+    agent = AIAgent(args.model, api_key) if api_key else None
 
-    # 1. Initialize Connectors
-    try:
-        conn1 = FileConnector(args.file1)
-        conn2 = FileConnector(args.file2)
-    except Exception as e:
-         print(f"Error loading files: {e}")
-         return
-
-    config = None
-
-    # 2. Schema Discovery / Configuration Phase
     if args.config:
-        print(f"Loading configuration from {args.config}...")
-        with open(args.config, 'r') as f:
-            config_data = json.load(f)
-            config = ValidationConfig(**config_data)
+        with open(args.config, encoding="utf-8") as f:
+            config = ValidationConfig(**json.load(f))
     else:
-        print("Gathering samples for AI analysis...")
-        sample1 = conn1.get_sample_data(5).to_csv(index=False)
-        sample2 = conn2.get_sample_data(5).to_csv(index=False)
-        
-        print("Requesting configuration from Gemini...")
-        agent = GeminiAgent()
+        if agent is None:
+            print(f"No API key for {args.model}. Pass --api-key, set the provider's *_API_KEY, or use --config.")
+            return 2
+        print(f"Requesting a mapping from {args.model}...")
         try:
-            config = agent.suggest_configuration(sample1, sample2)
-            
-            print("\n----- AI Suggested Configuration -----")
-            print(config.model_dump_json(indent=2))
-            print("--------------------------------------\n")
-            
-            if not args.auto:
-                confirm = input("Accept this configuration? (y/n/edit): ").strip().lower()
-                if confirm == 'edit':
-                    # Allow user to save it, edit it, and rerun
-                    temp_path = "temp_config.json"
-                    with open(temp_path, 'w') as f:
-                        f.write(config.model_dump_json(indent=2))
-                    print(f"\nConfiguration saved to {temp_path}.")
-                    print(f"Please edit this file and rerun using: python main.py {args.file1} {args.file2} --config {temp_path}")
-                    return
-                elif confirm != 'y':
-                    print("Aborting.")
-                    return
-                    
+            config = agent.suggest_configuration(pair.sample("source").to_csv(index=False),
+                                                 pair.sample("target").to_csv(index=False))
         except Exception as e:
             print(f"Failed to generate configuration from AI: {e}")
-            print("Please create a configuration JSON manually and pass it using --config")
-            return
+            return 2
+        print(config.model_dump_json(indent=2, exclude_none=True))
+        if not args.auto:
+            answer = input("Accept this configuration? (y/n/edit): ").strip().lower()
+            if answer == "edit":
+                with open("temp_config.json", "w", encoding="utf-8") as f:
+                    f.write(config.model_dump_json(indent=2, exclude_none=True))
+                print(f"Saved to temp_config.json. Edit it, then run:\n"
+                      f"  python main.py {args.file1} {args.file2} --config temp_config.json")
+                return 0
+            if answer != "y":
+                print("Aborting.")
+                return 0
 
+    config, notes = resolve_rules(config, agent)
+    print(f"Running the {args.engine} engine...")
+    try:
+        result = pair.run(config)
+    except ValueError as e:
+        print(f"Configuration error: {e}")
+        return 2
+    result.warnings[:0] = notes
 
-    # 3. Execution Phase
-    print("\nReading full datasets...")
-    df1 = conn1.read_data()
-    df2 = conn2.read_data()
-    
-    print("Running comparison engine...")
-    comparator = DataComparator(config)
-    results = comparator.compare(df1, df2)
-    
-    # 4. Reporting Phase
-    print("\nGenerating Reports...")
-    reporter = Reporter()
-    reporter.generate_json_report(results)
-    
-    # Needs pandas imported in reporter to work properly... let's fix that during testing if it crashes
-    import pandas as pd
-    reporter.pandas = pd # simple hack for now, or we can just import it in the file
-    reporter.generate_csv_reports(results)
-    
-    # Print Quick Summary
-    mismatch_count = len(results.get("mismatches", []))
-    missing_f1_count = len(results.get("missing_in_file1", []))
-    missing_f2_count = len(results.get("missing_in_file2", []))
-    
+    reporter = Reporter(args.output)
+    paths = [reporter.generate_json_report(result), reporter.generate_excel_report(result),
+             *reporter.generate_csv_reports(result)]
+
     print("\n----- Validation Summary -----")
-    print(f"Row Values Mismatched:   {mismatch_count}")
-    print(f"Rows Missing in File 1:  {missing_f1_count}")
-    print(f"Rows Missing in File 2:  {missing_f2_count}")
-    if mismatch_count == 0 and missing_f1_count == 0 and missing_f2_count == 0:
-        print("\nSUCCESS! Files are matching perfectly based on the configuration.")
+    print(f"Source rows:              {result.total_source:,}")
+    print(f"Target rows:              {result.total_target:,}")
+    print(f"Matched rows:             {result.matched_rows:,}")
+    print(f"Mismatched rows:          {result.mismatched_rows:,}")
+    print(f"Missing in target:        {result.missing_in_target_count:,}")
+    print(f"Missing in source:        {result.missing_in_source_count:,}")
+    print(f"Duplicate keys:           {result.duplicate_key_count:,}")
+    for warning in result.warnings:
+        print(f"WARNING: {warning}")
+    print("\nReports:\n  " + "\n  ".join(paths))
+
+    if not result.has_exceptions:
+        print("\nSUCCESS! Source and target reconcile based on the configuration.")
+        return 0
+    return 1
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
