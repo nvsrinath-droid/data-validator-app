@@ -7,8 +7,8 @@ import streamlit as st
 from ai.agent import AIAgent, resolve_rules
 from core.db import DB_TYPES, DEFAULT_PORTS, MSSQL_DRIVERS, build_url, default_mssql_driver, installed_mssql_drivers
 from core.sources import DataPair
-from core.templates import (RULE_COL, SOURCE_COL, TARGET_COL, config_from_grid, config_to_grid,
-                            manual_config, read_template, template_bytes)
+from core.templates import (PREVIEW_COL, RULE_COL, SOURCE_COL, TARGET_COL, config_from_grid, config_to_grid,
+                            manual_config, preview_is_stale, read_template, template_bytes, with_rule_preview)
 
 from .results import render_results
 from .state import AVAILABLE_MODELS, reset_app, set_config
@@ -140,17 +140,28 @@ def _mapping_editor(pair: DataPair, key: str, file_slug: str) -> Tuple[list, pd.
                              key=f"{key}_pk_{st.session_state.config_version}")
 
     st.markdown("**Column Mappings** (leave blank or delete a row to ignore a column)")
+    # The grid being edited; kept in session so the preview column can be refreshed without losing edits
+    draft = st.session_state.get("grid_draft")
     grid = st.data_editor(
-        config_to_grid(config), num_rows="dynamic", width="stretch",
-        key=f"{key}_editor_{st.session_state.config_version}",
+        with_rule_preview(draft if draft is not None else config_to_grid(config)), num_rows="dynamic",
+        width="stretch", key=f"{key}_editor_{st.session_state.config_version}_{st.session_state.grid_version}",
         column_config={
             SOURCE_COL: st.column_config.SelectboxColumn("Source Column", options=[""] + source_cols),
             TARGET_COL: st.column_config.SelectboxColumn("Target Column", options=[""] + target_cols),
             RULE_COL: st.column_config.TextColumn(
                 "Validation Rule (Optional)", default="",
                 help="e.g. 'within 0.01', '+/- 5%', 'ignore case', 'same date, ignore time'"),
+            PREVIEW_COL: st.column_config.TextColumn(
+                PREVIEW_COL, disabled=True,
+                help="How the rule will be applied. Check this before running: 'within 1' is an absolute "
+                     "tolerance, 'within 1%' is a percentage of the source value."),
         },
     )
+    if preview_is_stale(grid):
+        # A rule was edited: redraw the grid (edits kept) so the preview matches it
+        st.session_state.grid_draft = grid
+        st.session_state.grid_version += 1
+        st.rerun()
 
     with st.expander("Comparison options"):
         options = {

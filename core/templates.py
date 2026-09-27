@@ -4,10 +4,12 @@ from typing import List, Sequence
 
 import pandas as pd
 
+from .rules import rule_preview
 from .schemas import ColumnMap, ValidationConfig
 
 SOURCE_COL, TARGET_COL, RULE_COL, PK_COL = "File 1 Column", "File 2 Column", "Validation Rule (Optional)", "Is Primary Key"
 GRID_COLUMNS = [SOURCE_COL, TARGET_COL, RULE_COL]
+PREVIEW_COL = "Interpreted As"  # read-only, shown next to the rule in the mapping grid
 
 
 def _cell(value) -> str:
@@ -21,6 +23,18 @@ def config_to_grid(config: ValidationConfig) -> pd.DataFrame:
     rows = [{SOURCE_COL: m.file1_column, TARGET_COL: m.file2_column, RULE_COL: m.validation_rule or ""}
             for m in config.column_mappings]
     return pd.DataFrame(rows, columns=GRID_COLUMNS)
+
+
+def with_rule_preview(grid: pd.DataFrame) -> pd.DataFrame:
+    """The editable grid columns plus a read-only preview of how each rule will be applied."""
+    out = grid[GRID_COLUMNS].reset_index(drop=True)
+    out[PREVIEW_COL] = [rule_preview(_cell(v)) for v in out[RULE_COL]]
+    return out
+
+
+def preview_is_stale(grid: pd.DataFrame) -> bool:
+    """True when a rule was edited and the preview column no longer describes it."""
+    return list(with_rule_preview(grid)[PREVIEW_COL]) != [_cell(v) for v in grid[PREVIEW_COL]]
 
 
 def config_from_grid(grid: pd.DataFrame, primary_keys: Sequence[str], **options) -> ValidationConfig:

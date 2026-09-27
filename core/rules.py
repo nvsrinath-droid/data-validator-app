@@ -97,3 +97,24 @@ def parse_rule(text: Optional[str]) -> Tuple[RuleSpec, Optional[str]]:
         return EXACT, None
 
     return EXACT, f"Rule '{raw}' was not understood; using exact match."
+
+
+def _amount(value: float) -> str:
+    return f"{value:,.2f}" if round(value, 2) == value else f"{value:,g}"
+
+
+def rule_preview(text: Optional[str]) -> str:
+    """How a rule typed in the mapping grid will be applied, e.g. "absolute ±1.00" or "±1% of source"."""
+    spec, warning = parse_rule(text)
+    if warning:
+        return "⚠ not understood: exact match, unless the AI can interpret it"
+    if spec.kind == RuleKind.ABS_TOLERANCE:
+        return f"absolute ±{_amount(spec.tolerance)}"
+    if spec.kind == RuleKind.PCT_TOLERANCE:
+        return f"±{spec.tolerance:g}% of source"
+    return {
+        RuleKind.EXACT: "exact",
+        RuleKind.IGNORE_CASE: "exact, ignoring case",
+        RuleKind.IGNORE_WHITESPACE: "exact, ignoring spaces",
+        RuleKind.DATE_ONLY: "same date, time ignored",
+    }[spec.kind]

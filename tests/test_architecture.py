@@ -209,3 +209,22 @@ def test_sql_server_form_offers_driver_and_certificate_options():
     driver = at.selectbox(key="driver_pd")
     assert driver.options[:2] == ["ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server"]
     assert at.checkbox(key="trust_pd").value is False
+
+
+def test_mapping_grid_shows_rule_preview():
+    """The grid shows how each rule will be applied, next to the rule, before the run."""
+    import pandas as pd
+    at = _app("heavy").run()
+    at.text_input(key="hfile1_0").input(str(SAMPLES / "inventory_system.csv"))
+    at.text_input(key="hfile2_0").input(str(SAMPLES / "vendor_catalog.csv"))
+    at.run()
+    at.button(key="heavy_manual").click().run()
+    # Same path the grid takes after the user types rules into it
+    at.session_state["grid_draft"] = pd.DataFrame({
+        "File 1 Column": ["CostPrice", "CostPrice", "Status"],
+        "File 2 Column": ["Unit_Cost", "Unit_Cost", "ProductStatus"],
+        "Validation Rule (Optional)": ["within 1", "within 1%", "ignore case"]})
+    at.run()
+    assert not at.exception
+    grid = at.get("arrow_data_frame")[0].value
+    assert list(grid["Interpreted As"]) == ["absolute ±1.00", "±1% of source", "exact, ignoring case"]

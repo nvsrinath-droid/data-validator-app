@@ -25,7 +25,7 @@ DEFAULT_MODELS = {"GEMINI_API_KEY": "Google Gemini 3.8 Flash", "OPENAI_API_KEY":
                   "ANTHROPIC_API_KEY": "Anthropic Claude Opus 5"}
 
 # Per-run workflow state, cleared on restart or when switching tiers
-WORKFLOW_KEYS = ["ai_config", "results", "config_signature", "is_template_loaded", "column_cache"]
+WORKFLOW_KEYS = ["ai_config", "results", "config_signature", "is_template_loaded", "column_cache", "grid_draft"]
 
 
 def init_state():
@@ -40,6 +40,7 @@ def init_state():
     ss.setdefault("is_guest", False)
     ss.setdefault("uploader_key", 0)
     ss.setdefault("config_version", 0)
+    ss.setdefault("grid_version", 0)
     ss.setdefault("ai_config", None)
     ss.setdefault("execution_tier", None)
 
@@ -72,6 +73,7 @@ def set_config(config, from_template: bool = False):
     st.session_state.ai_config = config
     st.session_state.is_template_loaded = from_template
     st.session_state.config_version += 1
+    st.session_state.pop("grid_draft", None)
     st.session_state.pop("results", None)
 
 
