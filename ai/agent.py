@@ -1,11 +1,26 @@
 import json
 from typing import List, Optional, Tuple
 
-from litellm import completion
+from litellm import completion, get_llm_provider
 from pydantic import ValidationError
 
 from core.rules import RuleSpec, parse_rule
 from core.schemas import ValidationConfig
+
+
+# Providers where temperature=0 and native JSON mode are safe to send. Claude 5 models reject
+# sampling parameters, OpenAI's GPT-5 reasoning models only accept the default temperature, and
+# LiteLLM emulates JSON mode on Anthropic with a forced tool call that newer Claude models reject.
+# Every response is validated anyway, so omitting these only costs a little determinism.
+TEMPERATURE_PROVIDERS = {"gemini", "mistral", "groq", "cohere_chat", "cohere"}
+JSON_MODE_PROVIDERS = {"gemini", "mistral", "groq", "openai"}
+
+
+def provider_of(model: str) -> str:
+    try:
+        return get_llm_provider(model)[1]
+    except Exception:
+        return model.split("/", 1)[0] if "/" in model else ""
 
 
 def _strip_fences(text: str) -> str:
@@ -27,7 +42,7 @@ class AIAgent:
     def __init__(self, model_name: str, api_key: str):
         """
         Args:
-            model_name: The LiteLLM formatted model string (e.g., 'gpt-4o', 'gemini/gemini-2.5-flash')
+            model_name: The LiteLLM model string (e.g., 'anthropic/claude-opus-5', 'gemini/gemini-3.8-flash')
             api_key: The API key for the respective provider.
         """
         self.model_name = model_name
@@ -37,10 +52,12 @@ class AIAgent:
         kwargs = {
             "model": self.model_name,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0,
             "api_key": self.api_key,
         }
-        if is_json:
+        provider = provider_of(self.model_name)
+        if provider in TEMPERATURE_PROVIDERS:
+            kwargs["temperature"] = 0
+        if is_json and provider in JSON_MODE_PROVIDERS:
             kwargs["response_format"] = {"type": "json_object"}
         try:
             response = completion(**kwargs)

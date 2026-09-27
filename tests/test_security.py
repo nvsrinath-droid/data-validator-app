@@ -9,7 +9,8 @@ import pytest
 from sqlalchemy.engine import make_url
 
 import ai.agent as agent_mod
-from ai.agent import AIAgent, resolve_rules
+from ai.agent import AIAgent, provider_of, resolve_rules
+from ui.state import AVAILABLE_MODELS
 from connectors.sql_connector import SQLConnector
 from core.db import build_url, redact
 from core.engines.sql_builder import dialect_for
@@ -29,7 +30,7 @@ def fake_completion(content, calls):
 
 # ---- API keys ------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("model", ["gpt-4o", "gemini/gemini-2.5-flash", "claude-sonnet-5", "groq/llama3-70b-8192"])
+@pytest.mark.parametrize("model", [m for m, _ in AVAILABLE_MODELS.values()])
 def test_api_key_passed_per_call_not_via_environ(monkeypatch, model):
     calls = []
     monkeypatch.setattr(agent_mod, "completion", fake_completion('{"kind": "exact", "tolerance": null}', calls))
@@ -43,11 +44,41 @@ def test_api_key_passed_per_call_not_via_environ(monkeypatch, model):
     assert calls[0]["model"] == model
 
 
+@pytest.mark.parametrize("model", [m for m, _ in AVAILABLE_MODELS.values()])
+def test_picker_models_are_current_in_litellm(model):
+    import litellm
+    bare = model.split("/", 1)[1] if model.split("/", 1)[0] in ("openai", "anthropic", "cohere_chat") else model
+    info = litellm.model_cost.get(bare) or litellm.model_cost.get(model)
+    assert info, f"{model} is not in LiteLLM's model map"
+    assert not info.get("deprecation_date"), f"{model} is scheduled for retirement"
+
+
+@pytest.mark.parametrize("model, temperature, json_mode", [
+    ("anthropic/claude-opus-5", False, False),   # Claude 5 rejects sampling params; no forced-tool JSON
+    ("openai/gpt-5.6", False, True),             # GPT-5 reasoning models only take the default temperature
+    ("gemini/gemini-3.8-flash", True, True),
+    ("mistral/mistral-large-latest", True, True),
+])
+def test_only_supported_sampling_params_are_sent(monkeypatch, model, temperature, json_mode):
+    calls = []
+    monkeypatch.setattr(agent_mod, "completion", fake_completion('{"kind": "exact", "tolerance": null}', calls))
+    AIAgent(model, "k").interpret_rule("x", "A", "B")
+    assert ("temperature" in calls[0]) is temperature
+    assert ("response_format" in calls[0]) is json_mode
+
+
+def test_provider_resolution_for_key_lookup():
+    import main
+    assert provider_of("groq/openai/gpt-oss-120b") == "groq"
+    assert main.PROVIDER_KEY_VARS[provider_of("groq/openai/gpt-oss-120b")] == "GROQ_API_KEY"
+    assert main.PROVIDER_KEY_VARS[provider_of("anthropic/claude-opus-5")] == "ANTHROPIC_API_KEY"
+
+
 def test_two_users_keys_do_not_leak_between_agents(monkeypatch):
     calls = []
     monkeypatch.setattr(agent_mod, "completion", fake_completion('{"kind": "exact", "tolerance": null}', calls))
-    AIAgent("gpt-4o", "key-user-1").interpret_rule("x", "A", "B")
-    AIAgent("gpt-4o", "key-user-2").interpret_rule("x", "A", "B")
+    AIAgent("openai/gpt-5.6", "key-user-1").interpret_rule("x", "A", "B")
+    AIAgent("openai/gpt-5.6", "key-user-2").interpret_rule("x", "A", "B")
     assert [c["api_key"] for c in calls] == ["key-user-1", "key-user-2"]
 
 
@@ -56,7 +87,7 @@ def test_provider_errors_do_not_echo_the_key(monkeypatch):
         raise Exception(f"401 invalid key {kwargs['api_key']}")
     monkeypatch.setattr(agent_mod, "completion", boom)
     with pytest.raises(RuntimeError) as err:
-        AIAgent("gpt-4o", "sk-secret-123").interpret_rule("x", "A", "B")
+        AIAgent("openai/gpt-5.6", "sk-secret-123").interpret_rule("x", "A", "B")
     assert "sk-secret-123" not in str(err.value)
 
 
@@ -78,7 +109,7 @@ def test_ai_rule_becomes_validated_spec(monkeypatch):
     calls = []
     monkeypatch.setattr(agent_mod, "completion", fake_completion(
         '```json\n{"kind": "pct_tolerance", "tolerance": 2.5}\n```', calls))
-    spec = AIAgent("gpt-4o", "k").interpret_rule("no more than two and a half percent off", "Amt", "Amount")
+    spec = AIAgent("openai/gpt-5.6", "k").interpret_rule("no more than two and a half percent off", "Amt", "Amount")
     assert spec.kind == RuleKind.PCT_TOLERANCE and spec.tolerance == 2.5
 
 
@@ -95,7 +126,7 @@ def test_malicious_or_invalid_ai_output_is_rejected(monkeypatch, llm_output):
     cfg = ValidationConfig(primary_keys=["ID"], column_mappings=[
         ColumnMap(file1_column="Amt", file2_column="Amt", validation_rule="approximately right")])
 
-    resolved, notes = resolve_rules(cfg, AIAgent("gpt-4o", "k"))
+    resolved, notes = resolve_rules(cfg, AIAgent("openai/gpt-5.6", "k"))
 
     assert resolved.column_mappings[0].rule_spec is None  # engines fall back to exact + warning
     assert "could not interpret" in notes[0]
@@ -106,7 +137,7 @@ def test_resolve_rules_skips_rules_the_parser_understands(monkeypatch):
     monkeypatch.setattr(agent_mod, "completion", fake_completion("{}", calls))
     cfg = ValidationConfig(primary_keys=["ID"], column_mappings=[
         ColumnMap(file1_column="Amt", file2_column="Amt", validation_rule="within 0.01")])
-    resolve_rules(cfg, AIAgent("gpt-4o", "k"))
+    resolve_rules(cfg, AIAgent("openai/gpt-5.6", "k"))
     assert calls == []
 
 
@@ -114,7 +145,7 @@ def test_ai_suggested_config_cannot_inject_rule_specs(monkeypatch):
     monkeypatch.setattr(agent_mod, "completion", fake_completion(
         '{"primary_keys": ["ID"], "column_mappings": [{"file1_column": "A", "file2_column": "B", '
         '"rule_spec": {"kind": "abs_tolerance", "tolerance": 1e9}}]}', []))
-    cfg = AIAgent("gpt-4o", "k").suggest_configuration("ID,A", "ID,B")
+    cfg = AIAgent("openai/gpt-5.6", "k").suggest_configuration("ID,A", "ID,B")
     assert cfg.column_mappings[0].rule_spec is None
 
 

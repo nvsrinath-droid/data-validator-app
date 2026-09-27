@@ -3,27 +3,26 @@ import os
 
 import streamlit as st
 
-# Display name -> (litellm model string, provider API key name)
+# Display name -> (LiteLLM model string, provider API key name).
+# Provider prefixes make LiteLLM's routing explicit. Checked against LiteLLM's model map on 2026-09-26;
+# retired models (Gemini 1.5, GPT-4o, o1, Claude 3.x, Groq LLaMA 3, Mixtral) were removed.
 AVAILABLE_MODELS = {
-    "Google Gemini 2.5 Flash": ("gemini/gemini-2.5-flash", "GEMINI_API_KEY"),
-    "Google Gemini 1.5 Pro": ("gemini/gemini-1.5-pro", "GEMINI_API_KEY"),
-    "OpenAI GPT-4o": ("gpt-4o", "OPENAI_API_KEY"),
-    "OpenAI GPT-4o Mini": ("gpt-4o-mini", "OPENAI_API_KEY"),
-    "OpenAI o1": ("o1", "OPENAI_API_KEY"),
-    "OpenAI o1-mini": ("o1-mini", "OPENAI_API_KEY"),
-    "Anthropic Claude 3.5 Sonnet": ("claude-3-5-sonnet-20241022", "ANTHROPIC_API_KEY"),
-    "Anthropic Claude 3.5 Haiku": ("claude-3-5-haiku-20241022", "ANTHROPIC_API_KEY"),
-    "Anthropic Claude 3 Opus": ("claude-3-opus-20240229", "ANTHROPIC_API_KEY"),
-    "Groq LLaMA 3 70B": ("groq/llama3-70b-8192", "GROQ_API_KEY"),
-    "Groq LLaMA 3 8B": ("groq/llama3-8b-8192", "GROQ_API_KEY"),
-    "Groq Mixtral 8x7B": ("groq/mixtral-8x7b-32768", "GROQ_API_KEY"),
-    "Cohere Command R+": ("command-r-plus", "COHERE_API_KEY"),
-    "Cohere Command R": ("command-r", "COHERE_API_KEY"),
+    "Google Gemini 3.8 Flash": ("gemini/gemini-3.8-flash", "GEMINI_API_KEY"),
+    "Google Gemini 3.1 Pro (Preview)": ("gemini/gemini-3.1-pro-preview", "GEMINI_API_KEY"),
+    "Google Gemini 2.5 Pro": ("gemini/gemini-2.5-pro", "GEMINI_API_KEY"),
+    "OpenAI GPT-5.6": ("openai/gpt-5.6", "OPENAI_API_KEY"),
+    "OpenAI GPT-5.4 Mini": ("openai/gpt-5.4-mini", "OPENAI_API_KEY"),
+    "Anthropic Claude Opus 5": ("anthropic/claude-opus-5", "ANTHROPIC_API_KEY"),
+    "Anthropic Claude Sonnet 5": ("anthropic/claude-sonnet-5", "ANTHROPIC_API_KEY"),
+    "Anthropic Claude Haiku 4.5": ("anthropic/claude-haiku-4-5", "ANTHROPIC_API_KEY"),
+    "Groq GPT-OSS 120B": ("groq/openai/gpt-oss-120b", "GROQ_API_KEY"),
     "Mistral Large": ("mistral/mistral-large-latest", "MISTRAL_API_KEY"),
+    "Mistral Medium": ("mistral/mistral-medium-latest", "MISTRAL_API_KEY"),
+    "Cohere Command A+": ("cohere_chat/command-a-plus-05-2026", "COHERE_API_KEY"),
 }
 PROVIDER_KEYS = sorted({key for _, key in AVAILABLE_MODELS.values()})
-DEFAULT_MODELS = {"GEMINI_API_KEY": "Google Gemini 2.5 Flash", "OPENAI_API_KEY": "OpenAI GPT-4o",
-                  "ANTHROPIC_API_KEY": "Anthropic Claude 3.5 Sonnet"}
+DEFAULT_MODELS = {"GEMINI_API_KEY": "Google Gemini 3.8 Flash", "OPENAI_API_KEY": "OpenAI GPT-5.6",
+                  "ANTHROPIC_API_KEY": "Anthropic Claude Opus 5"}
 
 # Per-run workflow state, cleared on restart or when switching tiers
 WORKFLOW_KEYS = ["ai_config", "results", "config_signature", "is_template_loaded", "column_cache"]

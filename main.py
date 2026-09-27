@@ -1,7 +1,7 @@
 """Command-line reconciliation.
 
     python main.py source.csv target.csv --config config.json
-    python main.py source.csv target.csv --model gemini/gemini-2.5-flash --auto   # AI-suggested mapping
+    python main.py source.csv target.csv --model anthropic/claude-opus-5 --auto   # AI-suggested mapping
     python main.py big_source.csv big_target.csv --config config.json --engine duckdb
 
 Exits 0 when the files reconcile, 1 when exceptions were found, 2 on errors, so it can gate a pipeline.
@@ -13,22 +13,19 @@ import sys
 
 from dotenv import load_dotenv
 
-from ai.agent import AIAgent, resolve_rules
+from ai.agent import AIAgent, provider_of, resolve_rules
 from connectors.file_connector import FileConnector
 from core.reporter import Reporter
 from core.schemas import ValidationConfig
 from core.sources import ConnectorPair, FilePair
 
-PROVIDER_KEY_VARS = {"gemini": "GEMINI_API_KEY", "gpt": "OPENAI_API_KEY", "o1": "OPENAI_API_KEY",
-                     "claude": "ANTHROPIC_API_KEY", "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY",
-                     "command": "COHERE_API_KEY"}
+PROVIDER_KEY_VARS = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
+                     "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY", "cohere_chat": "COHERE_API_KEY",
+                     "cohere": "COHERE_API_KEY"}
 
 
 def api_key_for(model: str) -> str:
-    for hint, var in PROVIDER_KEY_VARS.items():
-        if hint in model.lower():
-            return os.environ.get(var, "")
-    return ""
+    return os.environ.get(PROVIDER_KEY_VARS.get(provider_of(model), ""), "")
 
 
 def main() -> int:
@@ -39,7 +36,7 @@ def main() -> int:
     parser.add_argument("--config", help="Path to a config JSON (skips the AI mapping step)")
     parser.add_argument("--engine", choices=["pandas", "duckdb"], default="pandas",
                         help="pandas (in memory) or duckdb (large files, streamed from disk)")
-    parser.add_argument("--model", default=os.environ.get("TRUEALIGN_MODEL", "gemini/gemini-2.5-flash"),
+    parser.add_argument("--model", default=os.environ.get("TRUEALIGN_MODEL", "gemini/gemini-3.8-flash"),
                         help="LiteLLM model string for AI mapping / rule interpretation")
     parser.add_argument("--api-key", help="API key for --model (default: the provider's *_API_KEY env var)")
     parser.add_argument("--auto", action="store_true", help="Accept the AI-suggested mapping without prompting")
