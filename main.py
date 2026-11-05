@@ -5,6 +5,9 @@
     python main.py big_source.csv big_target.csv --config config.json --engine duckdb
 
 Exits 0 when the files reconcile, 1 when exceptions were found, 2 on errors, so it can gate a pipeline.
+
+Single-table data quality (see quality_cli.py):
+    python main.py data.csv --quality checks.json
 """
 import argparse
 import json
@@ -18,6 +21,7 @@ from connectors.file_connector import FileConnector
 from core.reporter import Reporter
 from core.schemas import ValidationConfig
 from core.sources import ConnectorPair, FilePair
+from quality_cli import quality_main
 
 PROVIDER_KEY_VARS = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
                      "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY", "cohere_chat": "COHERE_API_KEY",
@@ -32,7 +36,7 @@ def main() -> int:
     load_dotenv()
     parser = argparse.ArgumentParser(description="TrueAlign data reconciliation (CLI)")
     parser.add_argument("file1", help="Path to the source file (system of record)")
-    parser.add_argument("file2", help="Path to the target file to compare")
+    parser.add_argument("file2", nargs="?", help="Path to the target file to compare (not used by data quality modes)")
     parser.add_argument("--config", help="Path to a config JSON (skips the AI mapping step)")
     parser.add_argument("--engine", choices=["pandas", "duckdb"], default="pandas",
                         help="pandas (in memory) or duckdb (large files, streamed from disk)")
@@ -41,12 +45,32 @@ def main() -> int:
     parser.add_argument("--api-key", help="API key for --model (default: the provider's *_API_KEY env var)")
     parser.add_argument("--auto", action="store_true", help="Accept the AI-suggested mapping without prompting")
     parser.add_argument("--output", default="output", help="Directory for the reports")
+
+    quality = parser.add_argument_group("data quality (single table; file1 only)")
+    modes = quality.add_mutually_exclusive_group()
+    modes.add_argument("--quality", metavar="CHECKS_JSON", help="Run the checks in this JSON file against file1")
+    modes.add_argument("--profile", action="store_true", help="Print a column profile of file1")
+    modes.add_argument("--suggest-checks", action="store_true",
+                       help="Ask the LLM to suggest checks from column statistics (no rows are sent)")
+    quality.add_argument("--ref", action="append", metavar="NAME=PATH",
+                         help="Reference table for ref_integrity checks (repeatable)")
+    quality.add_argument("--baseline", help="Saved profile used for type drift and column drift")
+    quality.add_argument("--save-baseline", help="Write file1's profile here (keep it outside the repo)")
+    quality.add_argument("--as-of", help="'Now' for freshness checks, ISO format (default: current time)")
+    quality.add_argument("--explain", action="store_true", help="Ask the LLM to explain the results (counts only)")
+    quality.add_argument("--include-extremes", action="store_true",
+                         help="Also send each numeric/date column's min and max to the LLM (off by default)")
     args = parser.parse_args()
+
+    api_key = args.api_key or api_key_for(args.model)
+    agent = AIAgent(args.model, api_key) if api_key else None
+    if args.quality or args.profile or args.suggest_checks:
+        return quality_main(args, agent)
+    if not args.file2:
+        parser.error("file2 is required unless --quality, --profile or --suggest-checks is used")
 
     pair = (FilePair(args.file1, args.file2) if args.engine == "duckdb"
             else ConnectorPair(FileConnector(args.file1), FileConnector(args.file2)))
-    api_key = args.api_key or api_key_for(args.model)
-    agent = AIAgent(args.model, api_key) if api_key else None
 
     if args.config:
         with open(args.config, encoding="utf-8") as f:
