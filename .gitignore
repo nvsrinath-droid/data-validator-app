@@ -16,3 +16,6 @@ output/
 temp_config.json
 source.csv
 external.csv
+
+# Saved column-profile baselines (type-drift reference); keep them outside the repo
+*.baseline.json

@@ -57,11 +57,16 @@ def quote(name: str) -> str:
     return DIALECT.quote(name)
 
 
+def column_sample(conn: duckdb.DuckDBPyConnection, table: str, name: str) -> list:
+    """Up to INFERENCE_SAMPLE non-null values of a column, used to infer its Kind."""
+    q = quote(name)
+    return [r[0] for r in conn.execute(
+        f"SELECT {q} FROM {table} WHERE {q} IS NOT NULL LIMIT {INFERENCE_SAMPLE}").fetchall()]
+
+
 def _profile_column(conn: duckdb.DuckDBPyConnection, table: str, name: str, db_type: str, rows: int) -> ColumnProfile:
     q = quote(name)
-    sample = [r[0] for r in conn.execute(
-        f"SELECT {q} FROM {table} WHERE {q} IS NOT NULL LIMIT {INFERENCE_SAMPLE}").fetchall()]
-    kind = infer_kind(sample, [])
+    kind = infer_kind(column_sample(conn, table, name), [])
 
     text = normalize_expr(DIALECT, q, Kind.STRING)   # trimmed, blank -> NULL
     value = normalize_expr(DIALECT, q, kind)         # the column's own kind
