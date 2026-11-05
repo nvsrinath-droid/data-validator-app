@@ -9,7 +9,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Annotated, List, Literal, Optional, Union
+from typing import Annotated, Dict, List, Literal, Optional, Union
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -155,6 +155,9 @@ class CheckResult:
 class QualityResult:
     row_count: int = 0
     columns: List[str] = field(default_factory=list)  # the table's column names, in order
+    # Reference tables handed to the run -> their column names (empty until a check actually loaded the table).
+    # Lets summaries tell a real reference column from a typo.
+    ref_columns: Dict[str, List[str]] = field(default_factory=dict)
     results: List[CheckResult] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 

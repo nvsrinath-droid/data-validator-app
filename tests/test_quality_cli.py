@@ -202,3 +202,13 @@ def test_overwrite_replaces_the_baseline_after_a_passing_run(cli, orders, tmp_pa
     pd.DataFrame({"ID": range(10), "Cust": ["C1"] * 10, "Amt": range(10), "Updated": ["2024-01-15"] * 10}).to_csv(grown, index=False)
     code, out = cli(grown, "--quality", ok, "--save-baseline", baseline, "--overwrite-baseline")
     assert code == 0 and "Saved baseline" in out and baseline.read_bytes() != before
+
+
+def test_explain_masks_a_column_name_that_is_not_in_the_table(cli, orders, tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent_mod, "completion", fake_completion("ok", calls))
+    checks = write_checks(tmp_path, [{"type": "null_rate", "column": "Typo_SSN"}], name="typo.json")
+    for extra in ([], ["--hide-column-names"]):
+        calls.clear()
+        code, _ = cli(orders, "--quality", checks, "--explain", "--api-key", "k", "--model", "openai/gpt-5", *extra)
+        assert code == 1 and "Typo_SSN" not in json.dumps(calls[0]["messages"])

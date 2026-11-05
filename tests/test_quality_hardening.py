@@ -400,3 +400,60 @@ def test_excel_reference_loads_after_earlier_checks_on_the_same_connection(tmp_p
               RefIntegrity(column="Cust", ref_name="p", ref_column="ID")]
     res = QualityEngine(checks, references={"p": ref}).run(data)
     assert [r.status for r in res.results] == ["pass", "pass", "fail"]
+
+
+# ---- re-review #1: a check that names a column the table does not have must not send that name ----
+
+def explain_prompt(monkeypatch, result, **kw):
+    calls = []
+    monkeypatch.setattr(agent_mod, "completion", fake_completion("ok", calls))
+    AIAgent("openai/gpt-5", "k").explain_results(result, **kw)
+    return calls[0]["messages"][0]["content"]
+
+
+@pytest.fixture
+def typo_result(tmp_path):
+    data = write(tmp_path, pd.DataFrame({"Salary": [1, 2], "Dept": ["a", "b"]}), "csv")
+    checks = [NullRate(column="Salary"), NullRate(column="Typo_SSN"), NullRate(column="2031-07-19"),
+              Distinct(column="Typo_SSN", unique=True)]
+    return QualityEngine(checks).run(data)
+
+
+@pytest.mark.parametrize("hide", [False, True])
+def test_unknown_column_names_are_masked_in_the_prompt(monkeypatch, typo_result, hide):
+    assert [r.status for r in typo_result.results] == ["pass", "error", "error", "error"]     # they really are unknown
+    sent = explain_prompt(monkeypatch, typo_result, hide_column_names=hide)
+    assert "Typo_SSN" not in sent and "2031-07-19" not in sent
+    columns = [c["check"]["column"] for c in json.loads(sent.split("\n\n")[1].strip())["checks"]]
+    assert columns[1] == columns[3] != columns[2]               # same unknown name -> same placeholder, others differ
+    assert all(c.startswith("unknown_col_") for c in columns[1:])
+    assert ("Salary" in sent) is (not hide)                     # real names are still sent unless hidden
+
+
+def test_a_result_without_a_column_list_masks_every_name():
+    result = QualityResult(row_count=2, columns=[], results=[
+        CheckResult(NullRate(column="Salary"), "pass", 0.0, 0), CheckResult(NullRate(column="918273645"), "pass", 0.0, 0)])
+    sent = json.dumps(result_summary(result))
+    assert "Salary" not in sent and "918273645" not in sent and "unknown_col_2" in sent
+
+
+def test_placeholders_for_unknown_names_do_not_collide_with_real_columns():
+    result = QualityResult(row_count=1, columns=["unknown_col_1", "A"], results=[
+        CheckResult(NullRate(column="Typo"), "error"), CheckResult(NullRate(column="unknown_col_1"), "pass")])
+    a, b = [c["check"]["column"] for c in result_summary(result)["checks"]]
+    assert a != b and b == "unknown_col_1"
+
+
+def test_unverified_reference_names_and_columns_are_masked(tmp_path):
+    data = write(tmp_path, pd.DataFrame({"Cust": ["C1", "C9"]}), "csv")
+    ref = write(tmp_path, pd.DataFrame({"ID": ["C1"]}), "csv", name="ref")
+    checks = [RefIntegrity(column="Cust", ref_name="customers", ref_column="ID"),          # real
+              RefIntegrity(column="Cust", ref_name="customers", ref_column="Typo_Col"),    # typo in the column
+              RefIntegrity(column="Cust", ref_name="Typo_Ref", ref_column="ID")]           # reference never provided
+    result = QualityEngine(checks, references={"customers": ref}).run(data)
+    assert [r.status for r in result.results] == ["fail", "error", "error"]
+    sent = json.dumps(result_summary(result))
+    assert "Typo_Col" not in sent and "Typo_Ref" not in sent
+    first = result_summary(result)["checks"][0]["check"]
+    assert (first["ref_name"], first["ref_column"]) == ("customers", "ID")
+    assert "ID" not in json.dumps(result_summary(result, hide_names=True)["checks"][0]["check"]["ref_column"])

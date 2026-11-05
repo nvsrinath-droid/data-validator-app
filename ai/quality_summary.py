@@ -85,15 +85,37 @@ def profile_summary(profile: TableProfile, include_extremes: bool = False, hide_
     return summary
 
 
+def _placeholder(prefix: str, n: int, taken: set) -> str:
+    alias = f"{prefix}_{n}"
+    while alias in taken:
+        alias += "_"
+    return alias
+
+
 def result_summary(result: QualityResult, include_extremes: bool = False, hide_names: bool = False) -> Dict[str, Any]:
+    """Structured counts for the LLM. A name is sent only if it is verified to be a real column of the table
+    (or of a reference table the run loaded); anything else - a typo, a column from another file, a value pasted
+    into a check, or every name when the result carries no column list - is replaced by a placeholder."""
     aliases = ColumnAliases(result.columns, hide_names)
-    ref_aliases: Dict[str, str] = {}        # reference-table columns: we only know the ones the checks mention
+    taken = set(result.columns) | set(aliases.from_alias)
+    unknown_cols: Dict[str, str] = {}
+    unknown_refs: Dict[str, str] = {}
+    ref_cols: Dict[str, str] = {}
     checks: List[Dict[str, Any]] = []
     for r in result.results:
         spec = r.check.model_dump(mode="json", exclude_none=True)
-        spec["column"] = aliases.alias(spec["column"])
-        if "ref_column" in spec and (hide_names or looks_like_data(spec["ref_column"])):
-            spec["ref_column"] = ref_aliases.setdefault(spec["ref_column"], f"ref_col_{len(ref_aliases) + 1}")
+        column = spec["column"]
+        spec["column"] = (aliases.alias(column) if column in aliases.names else
+                          unknown_cols.setdefault(column, _placeholder("unknown_col", len(unknown_cols) + 1, taken)))
+        if "ref_name" in spec:
+            ref_name, ref_column = spec["ref_name"], spec["ref_column"]
+            known_ref = ref_name in result.ref_columns
+            if not known_ref:
+                spec["ref_name"] = unknown_refs.setdefault(ref_name, _placeholder("unknown_ref", len(unknown_refs) + 1, taken))
+            safe_column = (known_ref and ref_column in result.ref_columns[ref_name] and not hide_names
+                           and not looks_like_data(ref_column))
+            if not safe_column:
+                spec["ref_column"] = ref_cols.setdefault(ref_column, _placeholder("ref_col", len(ref_cols) + 1, taken))
         metric = None if r.metric is None else round(r.metric, 4)
         if r.check.type == "freshness" and not include_extremes:
             metric = None  # the age, plus "now", is the newest timestamp in the data

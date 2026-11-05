@@ -40,6 +40,7 @@ class _Context:
     as_of: datetime
     limit: int
     _loaded: Dict[str, str] = field(default_factory=dict)
+    ref_columns: Dict[str, List[str]] = field(default_factory=dict)
 
     def frame(self, sql: str) -> pd.DataFrame:
         return self.conn.execute(sql).df()
@@ -136,9 +137,10 @@ def _freshness(ctx: _Context, c: Freshness) -> CheckResult:
 def _ref_integrity(ctx: _Context, c: RefIntegrity) -> CheckResult:
     child_col = ctx.profile.column(c.column)
     ref = ctx.ref_table(c.ref_name)
-    if c.ref_column not in ctx.columns_of(ref):
+    ctx.ref_columns[c.ref_name] = ctx.columns_of(ref)
+    if c.ref_column not in ctx.ref_columns[c.ref_name]:
         raise ValueError(f"Column {c.ref_column!r} not found in reference {c.ref_name!r}. "
-                         f"Available: {ctx.columns_of(ref)}")
+                         f"Available: {ctx.ref_columns[c.ref_name]}")
     kind = infer_kind(column_sample(ctx.conn, "t", c.column), column_sample(ctx.conn, ref, c.ref_column))
     child = normalize_expr(DIALECT, quote(c.column), kind)
     parent = normalize_expr(DIALECT, quote(c.ref_column), kind)
@@ -224,6 +226,8 @@ class QualityEngine:
             profile = profile_table(conn, "t")
             ctx = _Context(conn, profile, self.references, self.baseline, self.as_of, self.sample_limit)
             result = QualityResult(row_count=profile.row_count, columns=[c.name for c in profile.columns])
+            ctx.ref_columns.update({name: [] for name in self.references})
+            result.ref_columns = ctx.ref_columns
             if self.baseline is not None:
                 result.warnings += compare_profiles(self.baseline, profile)
             for check in self.checks:
