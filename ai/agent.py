@@ -12,7 +12,7 @@ from core.schemas import ValidationConfig
 # sampling parameters, OpenAI's GPT-5 reasoning models only accept the default temperature, and
 # LiteLLM emulates JSON mode on Anthropic with a forced tool call that newer Claude models reject.
 # Every response is validated anyway, so omitting these only costs a little determinism.
-TEMPERATURE_PROVIDERS = {"gemini", "mistral", "groq", "cohere_chat", "cohere"}
+TEMPERATURE_PROVIDERS = {"gemini", "mistral", "groq", "cohere_chat", "cohere", "deepseek"}
 JSON_MODE_PROVIDERS = {"gemini", "mistral", "groq", "openai"}
 
 

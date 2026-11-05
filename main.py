@@ -21,7 +21,7 @@ from core.sources import ConnectorPair, FilePair
 
 PROVIDER_KEY_VARS = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
                      "groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY", "cohere_chat": "COHERE_API_KEY",
-                     "cohere": "COHERE_API_KEY"}
+                     "cohere": "COHERE_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
 
 
 def api_key_for(model: str) -> str:

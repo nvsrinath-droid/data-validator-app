@@ -19,6 +19,7 @@ AVAILABLE_MODELS = {
     "Mistral Large": ("mistral/mistral-large-latest", "MISTRAL_API_KEY"),
     "Mistral Medium": ("mistral/mistral-medium-latest", "MISTRAL_API_KEY"),
     "Cohere Command A+": ("cohere_chat/command-a-plus-05-2026", "COHERE_API_KEY"),
+    "DeepSeek Chat": ("deepseek/deepseek-chat", "DEEPSEEK_API_KEY"),
 }
 PROVIDER_KEYS = sorted({key for _, key in AVAILABLE_MODELS.values()})
 DEFAULT_MODELS = {"GEMINI_API_KEY": "Google Gemini 3.8 Flash", "OPENAI_API_KEY": "OpenAI GPT-5.6",

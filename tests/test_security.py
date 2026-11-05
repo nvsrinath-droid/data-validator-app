@@ -69,6 +69,7 @@ def test_doc_models_match_the_code():
     ("openai/gpt-5.6", False, True),             # GPT-5 reasoning models only take the default temperature
     ("gemini/gemini-3.8-flash", True, True),
     ("mistral/mistral-large-latest", True, True),
+    ("deepseek/deepseek-chat", True, False),     # JSON mode left off; replies are validated anyway
 ])
 def test_only_supported_sampling_params_are_sent(monkeypatch, model, temperature, json_mode):
     calls = []
