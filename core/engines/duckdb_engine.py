@@ -14,6 +14,24 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def load_table(conn: duckdb.DuckDBPyConnection, path: str, table: str, keep_na_strings: bool = False):
+    """Load a CSV/Excel file into an in-memory DuckDB table.
+
+    By default Excel is read with pandas' defaults, which turn the text "N/A", "NA", "null"... into NULL.
+    keep_na_strings=True keeps those tokens as text (only empty cells are NULL), which is how CSV is
+    read; data quality checks need it so a literal "N/A" is reported rather than hidden.
+    """
+    if path.lower().endswith((".xls", ".xlsx")):
+        # Excel tops out at ~1M rows, so pandas is fine here and avoids needing
+        # a network download of a DuckDB extension on every run.
+        frame = pd.read_excel(path, keep_default_na=False, na_values=[""]) if keep_na_strings else pd.read_excel(path)
+        conn.register(f"{table}_df", frame)
+        conn.execute(f"CREATE TABLE {table} AS SELECT * FROM {table}_df")
+        conn.unregister(f"{table}_df")
+    else:
+        conn.execute(f"CREATE TABLE {table} AS SELECT * FROM read_csv_auto({_sql_literal(path)})")
+
+
 class DuckDBEngine:
     """
     Executes data validation directly on massive flat files using DuckDB, bypassing
@@ -23,17 +41,7 @@ class DuckDBEngine:
     def __init__(self, config: ValidationConfig):
         self.config = config
 
-    @staticmethod
-    def _load(conn: duckdb.DuckDBPyConnection, path: str, table: str):
-        if path.lower().endswith((".xls", ".xlsx")):
-            # Excel tops out at ~1M rows, so pandas is fine here and avoids needing
-            # a network download of a DuckDB extension on every run.
-            frame = pd.read_excel(path)
-            conn.register(f"{table}_df", frame)
-            conn.execute(f"CREATE TABLE {table} AS SELECT * FROM {table}_df")
-            conn.unregister(f"{table}_df")
-        else:
-            conn.execute(f"CREATE TABLE {table} AS SELECT * FROM read_csv_auto({_sql_literal(path)})")
+    _load = staticmethod(load_table)
 
     def compare(self, file1_path: str, file2_path: str, sample_limit: Optional[int] = None) -> ComparisonResult:
         conn = duckdb.connect(database=":memory:")
