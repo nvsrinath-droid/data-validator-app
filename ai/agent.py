@@ -166,7 +166,8 @@ class AIAgent:
           {{"type": "type_drift", "column": C, "expected": "numeric"|"date"|"string", "max_pct": 0-100}}
           {{"type": "freshness", "column": C, "max_age": "<number><m|h|d>"}}   (date columns only)
           {{"type": "ref_integrity", "column": C, "ref_name": R, "ref_column": RC, "max_orphans": int}}
-          {{"type": "outliers", "column": C, "method": "iqr"|"zscore", "k": number|null, "max_count": int}}  (numeric columns only)
+          {{"type": "outliers", "column": C, "method": "iqr"|"zscore", "k": number|null, "max_count": int}}  (numeric columns only; prefer "zscore"
+          for columns where more than half the values are equal, because "iqr" is inconclusive there)
         Every check may also set "severity": "fail" or "warn". C must be a column name from the summary.
         Reference tables you may use for ref_integrity: {json.dumps(references)} (you do not know their columns; omit
         ref_integrity unless you are confident of ref_column).

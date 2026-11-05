@@ -164,6 +164,16 @@ def _outliers(ctx: _Context, c: Outliers) -> CheckResult:
         if q1 is None:
             return CheckResult(c, "pass", 0.0, 0, "No numeric values to check.")
         iqr = _num(q3) - _num(q1)
+        if iqr == 0:
+            # Both fences collapse onto Q1 = Q3, so every value that differs from it would be flagged. That says
+            # "this column is mostly one value", not "these are outliers" (think discounts that are mostly 0).
+            total, same = ctx.one(f"SELECT COUNT({v}), SUM(CASE WHEN {v} = {_num(q1)!r} THEN 1 ELSE 0 END) FROM t")
+            if total == same:
+                return CheckResult(c, "pass", 0.0, 0, "All values are equal, so nothing can be an outlier.")
+            return CheckResult(
+                c, "inconclusive", None, 0,
+                f"IQR is 0: {100.0 * same / total:.0f}% of the values equal {_num(q1):g}, so the fences collapse onto "
+                f"that value and every other value would be flagged. Use method 'zscore' for this column.")
         lo, hi = _num(q1) - c.threshold * iqr, _num(q3) + c.threshold * iqr
         how = f"outside [{lo:g}, {hi:g}]"
     else:

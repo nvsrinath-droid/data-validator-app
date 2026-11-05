@@ -43,7 +43,7 @@ def print_profile(profile) -> None:
 
 
 def print_result(result: QualityResult) -> None:
-    icons = {"pass": "PASS", "warn": "WARN", "fail": "FAIL", "error": "ERR "}
+    icons = {"pass": "PASS", "warn": "WARN", "fail": "FAIL", "error": "ERR ", "inconclusive": "INCL"}
     print(f"\n----- Data Quality ({result.row_count:,} rows) -----")
     for r in result.results:
         print(f"[{icons[r.status]}] {r.check.label}: {r.message}")
@@ -51,10 +51,10 @@ def print_result(result: QualityResult) -> None:
             print("       " + r.sample.head(SAMPLE_ROWS_SHOWN).to_string(index=False).replace("\n", "\n       "))
     for w in result.warnings:
         print(f"WARNING: {w}")
-    failed = sum(r.status in ("fail", "error") for r in result.results)
-    warned = sum(r.status == "warn" for r in result.results)
-    print(f"\n{len(result.results)} checks: {len(result.results) - failed - warned} passed, "
-          f"{warned} warned, {failed} failed.")
+    count = {s: sum(r.status == s for r in result.results) for s in icons}
+    failed = count["fail"] + count["error"]
+    print(f"\n{len(result.results)} checks: {count['pass']} passed, {count['warn']} warned, "
+          f"{count['inconclusive']} inconclusive, {failed} failed.")
 
 
 def write_report(result: QualityResult, directory: str) -> str:

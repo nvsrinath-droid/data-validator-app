@@ -54,7 +54,7 @@ def test_passing_run_exits_zero_and_writes_a_report(cli, orders, tmp_path):
     checks = write_checks(tmp_path, [{"type": "null_rate", "column": "Cust", "max_pct": 50},
                                      {"type": "freshness", "column": "Updated", "max_age": "2h"}])
     code, out = cli(orders, "--quality", checks, "--as-of", "2024-01-15T11:00:00")
-    assert code == 0 and "2 checks: 2 passed, 0 warned, 0 failed" in out
+    assert code == 0 and "2 checks: 2 passed, 0 warned, 0 inconclusive, 0 failed" in out
     report = json.loads((tmp_path / "out" / "quality_report.json").read_text(encoding="utf-8"))
     assert [r["status"] for r in report["results"]] == ["pass", "pass"]
 

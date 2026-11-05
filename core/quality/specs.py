@@ -17,7 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from core.normalize import Kind
 
 Severity = Literal["fail", "warn"]
-Status = Literal["pass", "warn", "fail", "error"]
+# "inconclusive": the check could not give a meaningful answer for this data (not a failure; see Outliers).
+Status = Literal["pass", "warn", "fail", "error", "inconclusive"]
 
 _AGE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(m|min|h|d)\s*$", re.IGNORECASE)
 _AGE_SECONDS = {"m": 60, "min": 60, "h": 3600, "d": 86400}

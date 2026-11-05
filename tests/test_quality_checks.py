@@ -207,12 +207,12 @@ def test_iqr_outliers_and_worst_first_sample(tmp_path):
 def test_constant_column_has_no_outliers(tmp_path):
     for method in ("iqr", "zscore"):
         r = only(run_both(tmp_path, pd.DataFrame({"Amt": [5] * 20}), [Outliers(column="Amt", method=method)]))
-        assert (r.status, r.violations) == ("pass", 0)
+        assert (r.status, r.violations) == ("pass", 0)       # nothing differs, so nothing can be an outlier
 
 
-def test_iqr_with_tied_values_flags_the_lone_extreme(tmp_path):
+def test_iqr_with_tied_values_is_inconclusive_not_a_failure(tmp_path):
     r = only(run_both(tmp_path, pd.DataFrame({"Amt": [1, 1, 1, 1, 100]}), [Outliers(column="Amt")]))
-    assert r.violations == 1
+    assert (r.status, r.violations) == ("inconclusive", 0) and "zscore" in r.message
 
 
 def test_zscore_outliers(tmp_path):

@@ -159,3 +159,50 @@ def test_non_finite_values_in_the_data_do_not_break_outliers(tmp_path):
         r = only(QualityEngine([Outliers(column="Amt", method=method, k=3)]).run(path))
         assert (r.status, r.violations) == ("fail", 1), (method, r.message)
         assert [float(v) for v in r.sample["value"]] == [1000.0]
+
+
+# ---- #7 IQR on tied values is inconclusive, with the reason and the z-score suggestion ---------
+
+def tied(n_ties, tie_value, others):
+    return [tie_value] * n_ties + list(others)
+
+
+@pytest.mark.parametrize("name,values,share", [
+    ("80% zeros", tied(800, 0, [1 + i % 50 for i in range(200)]), "80%"),
+    ("60% tens", tied(600, 10, [9, 11] * 200), "60%"),
+    ("lone extreme", [1, 1, 1, 1, 100], "80%"),
+])
+def test_iqr_with_mostly_equal_values_is_inconclusive(tmp_path, name, values, share):
+    for fmt in FORMATS:
+        res = QualityEngine([Outliers(column="Amt")]).run(write(tmp_path, pd.DataFrame({"Amt": values}), fmt))
+        r = only(res)
+        assert (r.status, r.violations, r.metric) == ("inconclusive", 0, None), (name, fmt, r.message)
+        assert share in r.message and "zscore" in r.message and "IQR is 0" in r.message
+        assert not res.has_failures
+
+
+def test_z_score_is_the_suggested_way_out(tmp_path):
+    values = tied(800, 0, [1 + i % 5 for i in range(199)] + [5000])
+    path = write(tmp_path, pd.DataFrame({"Amt": values}), "csv")
+    assert only(QualityEngine([Outliers(column="Amt")]).run(path)).status == "inconclusive"
+    r = only(QualityEngine([Outliers(column="Amt", method="zscore")]).run(path))
+    assert r.status == "fail" and r.violations >= 1 and 5000.0 in [float(v) for v in r.sample["value"]]
+
+
+def test_constant_column_passes_and_ordinary_spread_still_uses_iqr(tmp_path):
+    assert only(QualityEngine([Outliers(column="A")]).run(write(tmp_path, pd.DataFrame({"A": [7] * 30}), "csv"))).status == "pass"
+    spread = pd.DataFrame({"A": [10, 11, 12, 13, 14, 15, 16, 17, 500]})
+    r = only(QualityEngine([Outliers(column="A")]).run(write(tmp_path, spread, "csv")))
+    assert (r.status, r.violations) == ("fail", 1)
+
+
+def test_inconclusive_is_reported_by_the_cli_without_failing_the_run(tmp_path, capsys):
+    from quality_cli import quality_main
+    checks = tmp_path / "c.json"
+    checks.write_text(json.dumps({"checks": [{"type": "outliers", "column": "Amt"}]}))
+    data = write(tmp_path, pd.DataFrame({"Amt": tied(80, 0, range(1, 21))}), "csv")
+    args = SimpleNamespace(profile=False, suggest_checks=False, quality=str(checks), file1=data, ref=None,
+                           as_of=None, baseline=None, save_baseline=None, output=str(tmp_path / "o"), explain=False)
+    assert quality_main(args, None) == 0
+    out = capsys.readouterr().out
+    assert "[INCL]" in out and "1 inconclusive" in out and "0 failed" in out
