@@ -57,6 +57,19 @@ def quote(name: str) -> str:
     return DIALECT.quote(name)
 
 
+def identity_expr(q: str, kind: Kind) -> str:
+    """What makes two non-blank values "the same value" for distinct counts and duplicate detection.
+
+    Values that parse as the column's kind compare by parsed value (100 = 100.0); values that do not parse
+    compare by their trimmed text, so unparseable values like 'N/A' are neither dropped nor lumped together.
+    (An unparseable text can never equal a formatted parsed value, so the two groups cannot collide.)
+    """
+    text = normalize_expr(DIALECT, q, Kind.STRING)
+    if kind == Kind.STRING:
+        return text
+    return f"COALESCE(CAST({normalize_expr(DIALECT, q, kind)} AS VARCHAR), {text})"
+
+
 def column_sample(conn: duckdb.DuckDBPyConnection, table: str, name: str) -> list:
     """Up to INFERENCE_SAMPLE non-null values of a column, used to infer its Kind."""
     q = quote(name)
@@ -75,7 +88,7 @@ def _profile_column(conn: duckdb.DuckDBPyConnection, table: str, name: str, db_t
     extremes = (f"CAST(MIN({value}) AS VARCHAR), CAST(MAX({value}) AS VARCHAR)"
                 if kind != Kind.STRING else "NULL, NULL")
     non_null, distinct, bad, lo, hi = conn.execute(
-        f"SELECT COUNT({text}), COUNT(DISTINCT {value}), COALESCE({nonconforming}, 0), {extremes} FROM {table}"
+        f"SELECT COUNT({text}), COUNT(DISTINCT {identity_expr(q, kind)}), COALESCE({nonconforming}, 0), {extremes} FROM {table}"
     ).fetchone()
     nulls = rows - non_null
     return ColumnProfile(

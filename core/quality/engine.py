@@ -15,7 +15,7 @@ from core.engines.sql_builder import normalize_expr
 from core.normalize import Kind, infer_kind
 
 from .baseline import compare_profiles
-from .profile import DIALECT, TableProfile, column_sample, profile_table, quote
+from .profile import DIALECT, TableProfile, column_sample, identity_expr, profile_table, quote
 from .specs import (CheckResult, CheckSpec, Distinct, Freshness, NullRate, Outliers, QualityConfig,
                     QualityResult, RefIntegrity, Severity, TypeDrift)
 
@@ -89,8 +89,8 @@ def _distinct(ctx: _Context, c: Distinct) -> CheckResult:
         violations += 1
     sample = pd.DataFrame()
     if c.unique and duplicates:
-        value = normalize_expr(DIALECT, quote(c.column), col.kind)
-        sample = ctx.frame(f"SELECT CAST({value} AS VARCHAR) AS value, COUNT(*) AS rows FROM t "
+        value = identity_expr(quote(c.column), col.kind)
+        sample = ctx.frame(f"SELECT {value} AS value, COUNT(*) AS rows FROM t "
                            f"WHERE ({value}) IS NOT NULL GROUP BY 1 HAVING COUNT(*) > 1 "
                            f"ORDER BY rows DESC, value LIMIT {ctx.limit}")
     message = "; ".join(problems) or f"{col.distinct_count:,} distinct values across {col.non_null_count:,} non-null rows."
