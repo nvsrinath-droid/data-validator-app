@@ -379,3 +379,24 @@ def test_a_large_file_with_markers_reaches_the_prompts_as_summaries_only(tmp_pat
     for secret in ("ZXQ-SECRET-7731", "918273645", "2031-07-19", "ZXQ_PATH", str(tmp_path)):
         assert secret not in sent, secret
     assert "Salary" in sent and "Updated" in sent                # real, non-data-like names are still sent
+
+
+# ---- CI on Python 3.12 (pandas 3, duckdb 2): an open result blocked loading an Excel reference ----
+
+def test_fetch_one_leaves_the_connection_usable_for_registering_a_dataframe():
+    """DuckDB 2.x raises 'Resource In Use Error' on register() while a fetchone() result is still open."""
+    from core.quality.profile import fetch_one
+    conn = duckdb.connect(":memory:")
+    assert fetch_one(conn, "SELECT x FROM range(1000) t(x)") == (0,)       # many rows, only the first is wanted
+    conn.register("late_df", pd.DataFrame({"a": [1]}))
+    assert conn.execute("SELECT a FROM late_df").fetchall() == [(1,)]
+    conn.close()
+
+
+def test_excel_reference_loads_after_earlier_checks_on_the_same_connection(tmp_path):
+    data = write(tmp_path, pd.DataFrame({"Cust": ["C1", "C9"], "Amt": [1, 2]}), "xlsx")
+    ref = write(tmp_path, pd.DataFrame({"ID": ["C1"]}), "xlsx", name="ref")
+    checks = [NullRate(column="Amt"), Distinct(column="Cust", unique=True),
+              RefIntegrity(column="Cust", ref_name="p", ref_column="ID")]
+    res = QualityEngine(checks, references={"p": ref}).run(data)
+    assert [r.status for r in res.results] == ["pass", "pass", "fail"]

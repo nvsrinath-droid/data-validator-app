@@ -15,7 +15,7 @@ from core.engines.sql_builder import normalize_expr
 from core.normalize import Kind, infer_kind
 
 from .baseline import compare_profiles
-from .profile import DIALECT, TableProfile, column_sample, identity_expr, profile_table, quote
+from .profile import DIALECT, TableProfile, column_sample, fetch_one, identity_expr, profile_table, quote
 from .specs import (CheckResult, CheckSpec, Distinct, Freshness, NullRate, Outliers, QualityConfig,
                     QualityResult, RefIntegrity, Severity, TypeDrift)
 
@@ -45,7 +45,7 @@ class _Context:
         return self.conn.execute(sql).df()
 
     def one(self, sql: str):
-        return self.conn.execute(sql).fetchone()
+        return fetch_one(self.conn, sql)
 
     def ref_table(self, name: str) -> str:
         if name not in self.references:

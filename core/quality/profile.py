@@ -53,6 +53,15 @@ class TableProfile(BaseModel):
         return cls.model_validate(json.loads(text))
 
 
+def fetch_one(conn: duckdb.DuckDBPyConnection, sql: str) -> tuple:
+    """First row of a query, with the result fully consumed.
+
+    cursor.fetchone() leaves the result open, and DuckDB 2.x then refuses further work on the connection
+    (conn.register for an Excel reference table fails with "Resource In Use Error"). fetchall() finishes it.
+    """
+    return conn.execute(sql).fetchall()[0]
+
+
 def quote(name: str) -> str:
     return DIALECT.quote(name)
 
@@ -87,9 +96,9 @@ def _profile_column(conn: duckdb.DuckDBPyConnection, table: str, name: str, db_t
                      if kind != Kind.STRING else "0")
     extremes = (f"CAST(MIN({value}) AS VARCHAR), CAST(MAX({value}) AS VARCHAR)"
                 if kind != Kind.STRING else "NULL, NULL")
-    non_null, distinct, bad, lo, hi = conn.execute(
-        f"SELECT COUNT({text}), COUNT(DISTINCT {identity_expr(q, kind)}), COALESCE({nonconforming}, 0), {extremes} FROM {table}"
-    ).fetchone()
+    non_null, distinct, bad, lo, hi = fetch_one(
+        conn, f"SELECT COUNT({text}), COUNT(DISTINCT {identity_expr(q, kind)}), COALESCE({nonconforming}, 0), "
+              f"{extremes} FROM {table}")
     nulls = rows - non_null
     return ColumnProfile(
         name=name, db_type=db_type, kind=kind, non_null_count=non_null, null_count=nulls,
@@ -98,7 +107,7 @@ def _profile_column(conn: duckdb.DuckDBPyConnection, table: str, name: str, db_t
 
 
 def profile_table(conn: duckdb.DuckDBPyConnection, table: str) -> TableProfile:
-    rows = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    rows = fetch_one(conn, f"SELECT COUNT(*) FROM {table}")[0]
     described = conn.execute(f"DESCRIBE {table}").fetchall()
     return TableProfile(row_count=rows, columns=[
         _profile_column(conn, table, d[0], d[1], rows) for d in described])
