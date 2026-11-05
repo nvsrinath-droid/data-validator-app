@@ -2,10 +2,17 @@ import json
 from typing import List, Optional, Tuple
 
 from litellm import completion, get_llm_provider
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
+from ai.quality_summary import profile_summary, result_summary
+from core.normalize import Kind
+from core.quality.profile import TableProfile
+from core.quality.specs import CheckSpec, Freshness, Outliers, QualityResult, RefIntegrity
 from core.rules import RuleSpec, parse_rule
 from core.schemas import ValidationConfig
+
+MAX_SUGGESTED_CHECKS = 50
+_CHECK_ADAPTER = TypeAdapter(CheckSpec)
 
 
 # Providers where temperature=0 and native JSON mode are safe to send. Claude 5 models reject
@@ -135,6 +142,81 @@ class AIAgent:
         if data.get("kind") == "unsupported":
             raise ValueError("The model could not express this rule with the supported rule kinds")
         return RuleSpec.model_validate(data)  # extra="forbid": any unexpected field is rejected
+
+
+    # ---- data quality (summaries only; see ai/quality_summary.py) -----------------------
+
+    def suggest_checks(self, profile: TableProfile, references: Optional[List[str]] = None,
+                       include_extremes: bool = False) -> Tuple[list, List[str]]:
+        """Suggest quality checks from a column profile. Returns (checks, notes about dropped suggestions).
+
+        The model sees only the profile summary. Each suggestion is validated as a closed-set CheckSpec
+        and checked against the real columns and the offered reference names; anything else is dropped.
+        """
+        references = list(references or [])
+        summary = profile_summary(profile, include_extremes)
+        prompt = f"""
+        You are a data quality engineer. Below is a statistical summary of one table (no row values).
+
+        {json.dumps(summary)}
+
+        Suggest data quality checks. Use ONLY these check types (JSON objects):
+          {{"type": "null_rate", "column": C, "max_pct": 0-100}}
+          {{"type": "distinct", "column": C, "unique": true|false, "min_distinct": int|null, "max_distinct": int|null}}
+          {{"type": "type_drift", "column": C, "expected": "numeric"|"date"|"string", "max_pct": 0-100}}
+          {{"type": "freshness", "column": C, "max_age": "<number><m|h|d>"}}   (date columns only)
+          {{"type": "ref_integrity", "column": C, "ref_name": R, "ref_column": RC, "max_orphans": int}}
+          {{"type": "outliers", "column": C, "method": "iqr"|"zscore", "k": number|null, "max_count": int}}  (numeric columns only)
+        Every check may also set "severity": "fail" or "warn". C must be a column name from the summary.
+        Reference tables you may use for ref_integrity: {json.dumps(references)} (you do not know their columns; omit
+        ref_integrity unless you are confident of ref_column).
+
+        Respond ONLY with JSON: {{"checks": [ ... ]}}
+        """
+        text = self._call_llm(prompt, is_json=True)
+        try:
+            data = json.loads(_strip_fences(text))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse LLM JSON checks: {e}") from None
+        raw = data.get("checks") if isinstance(data, dict) else data
+        if not isinstance(raw, list):
+            raise ValueError("Expected a JSON object with a 'checks' list")
+
+        columns = {c.name: c for c in profile.columns}
+        checks, notes = [], []
+        for item in raw[:MAX_SUGGESTED_CHECKS]:
+            try:
+                spec = _CHECK_ADAPTER.validate_python(item)
+            except ValidationError as e:
+                notes.append(f"Dropped an invalid suggestion ({e.errors()[0]['msg']}).")
+                continue
+            col = columns.get(spec.column)
+            if col is None:
+                notes.append(f"Dropped {spec.type} on unknown column {spec.column!r}.")
+            elif isinstance(spec, Outliers) and col.kind != Kind.NUMERIC:
+                notes.append(f"Dropped outliers on non-numeric column {spec.column!r}.")
+            elif isinstance(spec, Freshness) and col.kind != Kind.DATE:
+                notes.append(f"Dropped freshness on non-date column {spec.column!r}.")
+            elif isinstance(spec, RefIntegrity) and spec.ref_name not in references:
+                notes.append(f"Dropped ref_integrity against unknown reference {spec.ref_name!r}.")
+            else:
+                checks.append(spec)
+        if len(raw) > MAX_SUGGESTED_CHECKS:
+            notes.append(f"Ignored {len(raw) - MAX_SUGGESTED_CHECKS} suggestions beyond the first {MAX_SUGGESTED_CHECKS}.")
+        return checks, notes
+
+    def explain_results(self, result: QualityResult) -> str:
+        """Plain-English triage of a quality run. The model sees check parameters and counts, never data."""
+        prompt = f"""
+        You are a data quality engineer. Here are the results of data quality checks on one table.
+        You only have counts and thresholds, not the data itself.
+
+        {json.dumps(result_summary(result))}
+
+        In plain English: say what failed or warned and by how much, what the likely causes are, and what to
+        look at first. Do not invent values or column contents. Be concise.
+        """
+        return (self._call_llm(prompt) or "").strip()
 
 
 def resolve_rules(config: ValidationConfig, agent: Optional[AIAgent]) -> Tuple[ValidationConfig, List[str]]:
