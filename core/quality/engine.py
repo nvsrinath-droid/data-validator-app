@@ -223,7 +223,7 @@ class QualityEngine:
             load_table(conn, path, "t", raw=True)
             profile = profile_table(conn, "t")
             ctx = _Context(conn, profile, self.references, self.baseline, self.as_of, self.sample_limit)
-            result = QualityResult(row_count=profile.row_count)
+            result = QualityResult(row_count=profile.row_count, columns=[c.name for c in profile.columns])
             if self.baseline is not None:
                 result.warnings += compare_profiles(self.baseline, profile)
             for check in self.checks:

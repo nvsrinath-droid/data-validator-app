@@ -206,3 +206,176 @@ def test_inconclusive_is_reported_by_the_cli_without_failing_the_run(tmp_path, c
     assert quality_main(args, None) == 0
     out = capsys.readouterr().out
     assert "[INCL]" in out and "1 inconclusive" in out and "0 failed" in out
+
+
+# ---- #2 header rows that are really data, #3 freshness metric, #12 db types, #14 coverage ------
+
+import duckdb  # noqa: E402
+from datetime import datetime  # noqa: E402
+
+from ai.quality_summary import ColumnAliases, looks_like_data, profile_summary, result_summary  # noqa: E402
+from core.quality.profile import profile_table  # noqa: E402
+from core.quality.specs import CheckResult, QualityResult, RefIntegrity  # noqa: E402
+
+SECRET_TEXT, SECRET_NUMBER = "ACME-SECRET", "918273645"
+
+
+def prompt_json(calls) -> str:
+    return json.dumps([c["messages"] for c in calls])
+
+
+@pytest.mark.parametrize("name,flag", [
+    ("Salary", False), ("Cust ID", False), ("AN8", False), ("order_date", False), ("Unnamed: 3", False),
+    ("918273645", True), ("918273645.0", True), ("-12.5", True), ("1e5", True), ("2024-01-15", True),
+    ("2024-01-15 10:00:00", True), ("", True), ("   ", True), ("x" * 65, True),
+])
+def test_names_that_look_like_data(name, flag):
+    assert looks_like_data(name) is flag
+
+
+@pytest.fixture
+def headerless(tmp_path):
+    """No header row: the first data row becomes the 'column names' (this is the repro from the review)."""
+    path = tmp_path / "nohdr.xlsx"
+    pd.DataFrame([[SECRET_TEXT, float(SECRET_NUMBER)], ["Globex", 12.0], ["Initech", 13.0]]).to_excel(
+        path, index=False, header=False)
+    return str(path)
+
+
+def test_headerless_file_really_exposes_data_as_column_names(headerless):
+    names = [c.name for c in profile_file(headerless).columns]
+    assert SECRET_TEXT in names and any(SECRET_NUMBER in n for n in names)        # guards the guard
+
+
+def test_headerless_file_names_are_replaced_in_the_suggest_prompt(monkeypatch, headerless):
+    calls = []
+    monkeypatch.setattr(agent_mod, "completion", fake_completion('{"checks": []}', calls))
+    AIAgent("openai/gpt-5", "k").suggest_checks(profile_file(headerless))
+    sent = prompt_json(calls)
+    assert SECRET_TEXT not in sent and SECRET_NUMBER not in sent
+    assert "col_1" in sent and "col_2" in sent
+
+
+def test_placeholders_map_back_to_the_real_columns(monkeypatch, headerless):
+    profile = profile_file(headerless)
+    real = [c.name for c in profile.columns]
+    out = json.dumps({"checks": [{"type": "null_rate", "column": "col_2", "max_pct": 5},
+                                 {"type": "null_rate", "column": SECRET_TEXT},          # a real name was never sent
+                                 {"type": "null_rate", "column": "col_9"}]})
+    monkeypatch.setattr(agent_mod, "completion", fake_completion(out))
+    checks, notes = AIAgent("openai/gpt-5", "k").suggest_checks(profile)
+    assert [c.column for c in checks] == [real[1]]
+    assert len(notes) == 2 and all("unknown column" in n for n in notes)
+
+
+def test_explain_prompt_hides_data_like_names(headerless):
+    real = [c.name for c in profile_file(headerless).columns]
+    result = QualityEngine([NullRate(column=real[0]), NullRate(column=real[1])]).run(headerless)
+    summary = json.dumps(result_summary(result))
+    assert SECRET_TEXT not in summary and SECRET_NUMBER not in summary
+    assert {c["check"]["column"] for c in json.loads(summary)["checks"]} == {"col_1", "col_2"}
+
+
+def test_a_few_data_like_names_are_replaced_individually():
+    a = ColumnAliases(["Name", "Amt", "918273645", "Dept"])         # 1 of 4 looks like data
+    assert [a.alias(n) for n in ("Name", "Amt", "918273645", "Dept")] == ["Name", "Amt", "col_3", "Dept"]
+    assert a.restore("col_3") == "918273645" and a.restore("Name") == "Name"
+    assert a.restore("918273645") is None and a.restore("Invented") is None
+
+
+def test_a_placeholder_never_collides_with_a_real_name():
+    a = ColumnAliases(["col_2", "918273645", "Dept", "Amt"])        # col_2 is real; position 2 needs a placeholder
+    assert a.alias("918273645") != "col_2" and a.restore(a.alias("918273645")) == "918273645"
+    assert a.restore("col_2") == "col_2"
+
+
+def test_hide_column_names_replaces_every_name(monkeypatch, tmp_path):
+    path = write(tmp_path, pd.DataFrame({"Salary": [1, 2], "SSN": ["a", "b"]}), "csv")
+    calls = []
+    monkeypatch.setattr(agent_mod, "completion",
+                        fake_completion('{"checks": [{"type": "null_rate", "column": "col_2"}]}', calls))
+    checks, _ = AIAgent("openai/gpt-5", "k").suggest_checks(profile_file(path), hide_column_names=True)
+    assert "Salary" not in prompt_json(calls) and "SSN" not in prompt_json(calls)
+    assert [c.column for c in checks] == ["SSN"]
+    result = QualityEngine([NullRate(column="SSN")]).run(path)
+    assert "SSN" not in json.dumps(result_summary(result, hide_names=True))
+    assert "SSN" in json.dumps(result_summary(result))             # names are sent when not hidden
+
+
+def test_reference_columns_that_look_like_data_are_replaced(tmp_path):
+    ref = write(tmp_path, pd.DataFrame({"2024-01-15": ["C1"]}), "csv", name="ref")
+    data = write(tmp_path, pd.DataFrame({"Cust": ["C1", "C2"]}), "csv")
+    result = QualityEngine([RefIntegrity(column="Cust", ref_name="p", ref_column="2024-01-15")],
+                           references={"p": ref}).run(data)
+    summary = json.dumps(result_summary(result))
+    assert "2024-01-15" not in summary and "ref_col_1" in summary
+
+
+def test_freshness_metric_is_withheld_unless_opted_in(tmp_path, monkeypatch):
+    data = write(tmp_path, pd.DataFrame({"D": ["2026-10-01 09:30:00"]}), "csv")
+    result = QualityEngine([Freshness(column="D", max_age="1h")], as_of=datetime(2026, 11, 4, 12)).run(data)
+    assert result.results[0].metric == pytest.approx(818.5)                    # measured locally
+    default = result_summary(result)["checks"][0]
+    assert default["metric"] is None and default["status"] == "fail" and default["check"]["max_age"] == "1h"
+    assert result_summary(result, include_extremes=True)["checks"][0]["metric"] == pytest.approx(818.5)
+    calls = []                                                                 # the agent passes the choice through
+    monkeypatch.setattr(agent_mod, "completion", fake_completion("ok", calls))
+    agent = AIAgent("openai/gpt-5", "k")
+    agent.explain_results(result)
+    assert "818.5" not in prompt_json(calls)
+    agent.explain_results(result, include_extremes=True)
+    assert "818.5" in prompt_json(calls[-1:])
+
+
+def test_other_metrics_are_still_sent(tmp_path):
+    data = write(tmp_path, pd.DataFrame({"A": [None, 1, 2, 3]}), "csv")
+    result = QualityEngine([NullRate(column="A")]).run(data)
+    assert result_summary(result)["checks"][0]["metric"] == 25.0
+
+
+def test_enum_type_names_are_not_sent(monkeypatch):
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TYPE mood AS ENUM ('ZXQ-ENUM-1', 'ZXQ-ENUM-2')")
+    conn.execute("CREATE TABLE t (m mood)")
+    conn.execute("INSERT INTO t VALUES ('ZXQ-ENUM-1'), ('ZXQ-ENUM-2')")
+    profile = profile_table(conn, "t")
+    assert "ZXQ-ENUM-1" in profile.columns[0].db_type                          # the type name spells the values out
+    assert "ZXQ-ENUM" not in json.dumps(profile_summary(profile))
+    calls = []
+    monkeypatch.setattr(agent_mod, "completion", fake_completion('{"checks": []}', calls))
+    AIAgent("openai/gpt-5", "k").suggest_checks(profile)
+    assert "ZXQ-ENUM" not in prompt_json(calls)
+    conn.close()
+
+
+def test_error_results_never_put_their_message_in_the_prompt(monkeypatch):
+    leaky = "Conversion Error: could not convert string 'ZXQ-SECRET-7731' to DOUBLE"
+    result = QualityResult(row_count=3, columns=["A"],
+                           results=[CheckResult(NullRate(column="A"), "error", message=leaky)])
+    calls = []
+    monkeypatch.setattr(agent_mod, "completion", fake_completion("ok", calls))
+    AIAgent("openai/gpt-5", "k").explain_results(result)
+    assert "ZXQ-SECRET-7731" not in prompt_json(calls) and "Conversion" not in prompt_json(calls)
+
+
+def test_a_large_file_with_markers_reaches_the_prompts_as_summaries_only(tmp_path, monkeypatch):
+    n = 30000                                                   # past DuckDB's CSV sniffing window
+    frame = pd.DataFrame({
+        "Name": [f"row-{i}" for i in range(n)] + ["ZXQ-SECRET-7731", "ZXQ-SECRET-7731"],
+        "Salary": [str(50 + i % 7) for i in range(n)] + ["918273645", "N/A"],
+        "Updated": ["2031-07-01"] * n + ["2031-07-19", "2031-07-19"],
+    })
+    data = write(tmp_path, frame, "csv", name="people_ZXQ_PATH")
+    checks = [Distinct(column="Name", unique=True), TypeDrift(column="Salary", expected=Kind.NUMERIC),
+              Outliers(column="Salary", method="zscore"), Freshness(column="Updated", max_age="1h")]
+    result = QualityEngine(checks, as_of=datetime(2031, 7, 20)).run(data)
+    assert result.row_count == n + 2 and all(r.status == "fail" for r in result.results[:2])
+    calls = []
+    monkeypatch.setattr(agent_mod, "completion", fake_completion('{"checks": []}', calls))
+    agent = AIAgent("openai/gpt-5", "sk-key-123")
+    agent.suggest_checks(profile_file(data))
+    agent.explain_results(result)
+    sent = prompt_json(calls) + json.dumps([{k: v for k, v in c.items() if k != "messages"} for c in calls])
+    for secret in ("ZXQ-SECRET-7731", "918273645", "2031-07-19", "ZXQ_PATH", str(tmp_path)):
+        assert secret not in sent, secret
+    assert "Salary" in sent and "Updated" in sent                # real, non-data-like names are still sent

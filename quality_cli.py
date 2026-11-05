@@ -94,7 +94,8 @@ def quality_main(args, agent: Optional[AIAgent]) -> int:
         print(f"Requesting check suggestions from {args.model} (column statistics only; no rows are sent)...")
         try:
             checks, notes = agent.suggest_checks(profile_file(args.file1), references=list(refs),
-                                                 include_extremes=args.include_extremes)
+                                                 include_extremes=args.include_extremes,
+                                                 hide_column_names=args.hide_column_names)
         except Exception as e:  # file errors and provider errors alike: report, exit 2
             print(f"Failed to get suggestions: {e}")
             return 2
@@ -124,7 +125,7 @@ def quality_main(args, agent: Optional[AIAgent]) -> int:
         else:
             print(f"\n----- Explanation from {args.model} (counts and thresholds only) -----")
             try:
-                print(agent.explain_results(result))
+                print(agent.explain_results(result, args.include_extremes, args.hide_column_names))
             except Exception as e:
                 print(f"Could not get an explanation: {e}")
     return 1 if result.has_failures else 0

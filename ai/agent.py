@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 from litellm import completion, get_llm_provider
 from pydantic import TypeAdapter, ValidationError
 
-from ai.quality_summary import profile_summary, result_summary
+from ai.quality_summary import ColumnAliases, profile_summary, result_summary
 from core.normalize import Kind
 from core.quality.profile import TableProfile
 from core.quality.specs import CheckSpec, Freshness, Outliers, QualityResult, RefIntegrity
@@ -147,14 +147,15 @@ class AIAgent:
     # ---- data quality (summaries only; see ai/quality_summary.py) -----------------------
 
     def suggest_checks(self, profile: TableProfile, references: Optional[List[str]] = None,
-                       include_extremes: bool = False) -> Tuple[list, List[str]]:
+                       include_extremes: bool = False, hide_column_names: bool = False) -> Tuple[list, List[str]]:
         """Suggest quality checks from a column profile. Returns (checks, notes about dropped suggestions).
 
         The model sees only the profile summary. Each suggestion is validated as a closed-set CheckSpec
         and checked against the real columns and the offered reference names; anything else is dropped.
         """
         references = list(references or [])
-        summary = profile_summary(profile, include_extremes)
+        aliases = ColumnAliases([c.name for c in profile.columns], hide_column_names)
+        summary = profile_summary(profile, include_extremes, hide_column_names, aliases)
         prompt = f"""
         You are a data quality engineer. Below is a statistical summary of one table (no row values).
 
@@ -194,7 +195,10 @@ class AIAgent:
             except (ValueError, TypeError, OverflowError) as e:  # a bad suggestion must never abort the rest
                 notes.append(f"Dropped an invalid suggestion ({type(e).__name__}).")
                 continue
-            col = columns.get(spec.column)
+            real = aliases.restore(spec.column)          # placeholders (col_3) map back to real names locally
+            col = columns.get(real) if real is not None else None
+            if col is not None and real != spec.column:
+                spec = spec.model_copy(update={"column": real})
             if col is None:
                 notes.append(f"Dropped {spec.type} on unknown column {spec.column!r}.")
             elif isinstance(spec, Outliers) and col.kind != Kind.NUMERIC:
@@ -209,13 +213,14 @@ class AIAgent:
             notes.append(f"Ignored {len(raw) - MAX_SUGGESTED_CHECKS} suggestions beyond the first {MAX_SUGGESTED_CHECKS}.")
         return checks, notes
 
-    def explain_results(self, result: QualityResult) -> str:
+    def explain_results(self, result: QualityResult, include_extremes: bool = False,
+                        hide_column_names: bool = False) -> str:
         """Plain-English triage of a quality run. The model sees check parameters and counts, never data."""
         prompt = f"""
         You are a data quality engineer. Here are the results of data quality checks on one table.
         You only have counts and thresholds, not the data itself.
 
-        {json.dumps(result_summary(result))}
+        {json.dumps(result_summary(result, include_extremes, hide_column_names))}
 
         In plain English: say what failed or warned and by how much, what the likely causes are, and what to
         look at first. Do not invent values or column contents. Be concise.

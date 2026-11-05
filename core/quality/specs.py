@@ -154,6 +154,7 @@ class CheckResult:
 @dataclass
 class QualityResult:
     row_count: int = 0
+    columns: List[str] = field(default_factory=list)  # the table's column names, in order
     results: List[CheckResult] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 

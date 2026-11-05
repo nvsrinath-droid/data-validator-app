@@ -59,7 +59,9 @@ def main() -> int:
     quality.add_argument("--as-of", help="'Now' for freshness checks, ISO format (default: current time)")
     quality.add_argument("--explain", action="store_true", help="Ask the LLM to explain the results (counts only)")
     quality.add_argument("--include-extremes", action="store_true",
-                         help="Also send each numeric/date column's min and max to the LLM (off by default)")
+                         help="Also send each column's min/max and the freshness age to the LLM (off by default)")
+    quality.add_argument("--hide-column-names", action="store_true",
+                         help="Send col_1..col_n instead of real column names to the LLM")
     args = parser.parse_args()
 
     api_key = args.api_key or api_key_for(args.model)
