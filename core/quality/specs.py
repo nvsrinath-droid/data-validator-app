@@ -5,6 +5,7 @@ so an LLM may *suggest* checks but can only ever return values from this closed 
 Specs name columns and, for referential integrity, a reference table by *name*; file paths
 are supplied by the caller and never by a spec.
 """
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -19,15 +20,19 @@ Severity = Literal["fail", "warn"]
 Status = Literal["pass", "warn", "fail", "error"]
 
 _AGE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(m|min|h|d)\s*$", re.IGNORECASE)
-_AGE_UNITS = {"m": "minutes", "min": "minutes", "h": "hours", "d": "days"}
+_AGE_SECONDS = {"m": 60, "min": 60, "h": 3600, "d": 86400}
+MAX_AGE = timedelta(days=36500)  # 100 years; anything larger is a mistake, and timedelta overflows eventually
 
 
 def parse_age(text: str) -> timedelta:
-    """'90m', '36h', '2d' -> timedelta."""
+    """'90m', '36h', '2d' -> timedelta (at most 100 years)."""
     m = _AGE_RE.match(text or "")
     if not m:
         raise ValueError(f"Invalid age {text!r}; use a number and a unit m, h or d (for example '36h')")
-    return timedelta(**{_AGE_UNITS[m.group(2).lower()]: float(m.group(1))})
+    seconds = float(m.group(1)) * _AGE_SECONDS[m.group(2).lower()]
+    if not math.isfinite(seconds) or seconds > MAX_AGE.total_seconds():
+        raise ValueError(f"Age {text!r} is too large (the maximum is 100 years)")
+    return timedelta(seconds=seconds)
 
 
 class _Check(BaseModel):
@@ -39,7 +44,7 @@ class _Check(BaseModel):
 class NullRate(_Check):
     """Share of NULL or blank values must not exceed max_pct (0-100)."""
     type: Literal["null_rate"] = "null_rate"
-    max_pct: float = Field(default=0.0, ge=0, le=100)
+    max_pct: float = Field(default=0.0, ge=0, le=100, allow_inf_nan=False)
 
     @property
     def label(self) -> str:
@@ -71,7 +76,7 @@ class TypeDrift(_Check):
     """
     type: Literal["type_drift"] = "type_drift"
     expected: Optional[Kind] = None
-    max_pct: float = Field(default=0.0, ge=0, le=100)
+    max_pct: float = Field(default=0.0, ge=0, le=100, allow_inf_nan=False)
 
     @property
     def label(self) -> str:
@@ -114,7 +119,7 @@ class Outliers(_Check):
     """Numeric values outside the IQR fences (k x IQR) or beyond k standard deviations."""
     type: Literal["outliers"] = "outliers"
     method: Literal["iqr", "zscore"] = "iqr"
-    k: Optional[float] = Field(default=None, gt=0)
+    k: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
     max_count: int = Field(default=0, ge=0)
 
     @property

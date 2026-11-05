@@ -157,7 +157,8 @@ def _outliers(ctx: _Context, c: Outliers) -> CheckResult:
     if col.kind != Kind.NUMERIC:
         raise ValueError(f"outliers needs a numeric column; {c.column!r} is {col.kind.value}")
     q = quote(c.column)
-    v = normalize_expr(DIALECT, q, Kind.NUMERIC)
+    raw_v = normalize_expr(DIALECT, q, Kind.NUMERIC)
+    v = f"(CASE WHEN isfinite({raw_v}) THEN {raw_v} END)"   # text like 'inf' or 'NaN' parses to a non-finite double
     if c.method == "iqr":
         q1, q3 = ctx.one(f"SELECT quantile_cont({v}, 0.25), quantile_cont({v}, 0.75) FROM t")
         if q1 is None:

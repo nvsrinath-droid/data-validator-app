@@ -190,6 +190,9 @@ class AIAgent:
             except ValidationError as e:
                 notes.append(f"Dropped an invalid suggestion ({e.errors()[0]['msg']}).")
                 continue
+            except (ValueError, TypeError, OverflowError) as e:  # a bad suggestion must never abort the rest
+                notes.append(f"Dropped an invalid suggestion ({type(e).__name__}).")
+                continue
             col = columns.get(spec.column)
             if col is None:
                 notes.append(f"Dropped {spec.type} on unknown column {spec.column!r}.")
