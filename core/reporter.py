@@ -1,54 +1,71 @@
+import io
 import json
-import csv
 import os
+
 import pandas as pd
-from typing import Dict, Any
+
+from .results import ComparisonResult
+
+
+def result_sheets(result: ComparisonResult) -> dict:
+    """Sheet name -> DataFrame for every section of a result."""
+    summary = pd.DataFrame([
+        ("Source rows", result.total_source),
+        ("Target rows", result.total_target),
+        ("Matched rows", result.matched_rows),
+        ("Mismatched rows", result.mismatched_rows),
+        ("Missing in target (source only)", result.missing_in_target_count),
+        ("Missing in source (target only)", result.missing_in_source_count),
+        ("Duplicate keys", result.duplicate_key_count),
+    ] + [(f"Mismatches: {col}", n) for col, n in result.mismatches_by_column.items()],
+        columns=["Metric", "Value"])
+    sheets = {
+        "Summary": summary,
+        "Mismatches": result.mismatches,
+        "Missing in Target": result.missing_in_target,
+        "Missing in Source": result.missing_in_source,
+        "Duplicate Keys": result.duplicate_keys,
+    }
+    if result.warnings:
+        sheets["Warnings"] = pd.DataFrame({"Warning": result.warnings})
+    return sheets
+
+
+def excel_report(result: ComparisonResult) -> bytes:
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        for name, frame in result_sheets(result).items():
+            frame.to_excel(writer, sheet_name=name[:31], index=False)
+    return buffer.getvalue()
+
 
 class Reporter:
-    """Handles outputting the comparison results."""
-    
+    """Writes comparison results to disk (used by the CLI)."""
+
     def __init__(self, output_dir: str = "output"):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
-        
-    def generate_json_report(self, results: Dict[str, Any], filename: str = "validation_report.json"):
-        """Saves the raw results dictionary to a JSON file."""
-        filepath = os.path.join(self.output_dir, filename)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=4)
-        print(f"JSON Report saved to: {filepath}")
-        
-    def generate_csv_reports(self, results: Dict[str, Any], prefix: str = "report"):
-        """Splits the results into readable CSV files."""
-        
-        # 1. Mismatches Report
-        if results.get("mismatches"):
-            mismatches_path = os.path.join(self.output_dir, f"{prefix}_mismatches.csv")
-            with open(mismatches_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Primary Key(s)", "Column", "File 1 (Source) Value", "File 2 Value"])
-                
-                for item in results["mismatches"]:
-                    pk_str = str(item["primary_keys"])
-                    for diff in item["differences"]:
-                        writer.writerow([
-                            pk_str,
-                            diff["column"],
-                            diff["file1_value"],
-                            diff["file2_value"]
-                        ])
-            print(f"Mismatches CSV saved to: {mismatches_path}")
 
-        # 2. Missing in File 1 (Only in File 2)
-        if results.get("missing_in_file1"):
-            missing_f1_path = os.path.join(self.output_dir, f"{prefix}_only_in_file2.csv")
-            df = pd.DataFrame(results["missing_in_file1"])
-            df.to_csv(missing_f1_path, index=False)
-            print(f"Missing in File 1 CSV saved to: {missing_f1_path}")
+    def generate_json_report(self, result: ComparisonResult, filename: str = "validation_report.json") -> str:
+        path = os.path.join(self.output_dir, filename)
+        payload = {name: json.loads(frame.to_json(orient="records", date_format="iso"))
+                   for name, frame in result_sheets(result).items()}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        return path
 
-        # 3. Missing in File 2 (Only in File 1)
-        if results.get("missing_in_file2"):
-            missing_f2_path = os.path.join(self.output_dir, f"{prefix}_only_in_file1.csv")
-            df = pd.DataFrame(results["missing_in_file2"])
-            df.to_csv(missing_f2_path, index=False)
-            print(f"Missing in File 2 CSV saved to: {missing_f2_path}")
+    def generate_csv_reports(self, result: ComparisonResult, prefix: str = "report") -> list:
+        paths = []
+        for name, frame in result_sheets(result).items():
+            if frame.empty:
+                continue
+            path = os.path.join(self.output_dir, f"{prefix}_{name.lower().replace(' ', '_')}.csv")
+            frame.to_csv(path, index=False)
+            paths.append(path)
+        return paths
+
+    def generate_excel_report(self, result: ComparisonResult, filename: str = "validation_report.xlsx") -> str:
+        path = os.path.join(self.output_dir, filename)
+        with open(path, "wb") as f:
+            f.write(excel_report(result))
+        return path

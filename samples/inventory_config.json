@@ -1,0 +1,10 @@
+{
+  "primary_keys": ["ProductID"],
+  "column_mappings": [
+    {"file1_column": "ProductID", "file2_column": "ID"},
+    {"file1_column": "ProductName", "file2_column": "Product_Desc", "validation_rule": "ignore case"},
+    {"file1_column": "Category", "file2_column": "Cat"},
+    {"file1_column": "CostPrice", "file2_column": "Unit_Cost", "validation_rule": "within 5%"},
+    {"file1_column": "Status", "file2_column": "ProductStatus", "validation_rule": "ignore case"}
+  ]
+}
