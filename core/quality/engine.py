@@ -52,7 +52,7 @@ class _Context:
             raise ValueError(f"Unknown reference table {name!r}. Provided: {sorted(self.references) or 'none'}")
         if name not in self._loaded:
             table = f"ref_{len(self._loaded)}"
-            load_table(self.conn, self.references[name], table, keep_na_strings=True)
+            load_table(self.conn, self.references[name], table, raw=True)
             self._loaded[name] = table
         return self._loaded[name]
 
@@ -209,7 +209,7 @@ class QualityEngine:
     def run(self, path: str) -> QualityResult:
         conn = duckdb.connect(database=":memory:")
         try:
-            load_table(conn, path, "t", keep_na_strings=True)
+            load_table(conn, path, "t", raw=True)
             profile = profile_table(conn, "t")
             ctx = _Context(conn, profile, self.references, self.baseline, self.as_of, self.sample_limit)
             result = QualityResult(row_count=profile.row_count)

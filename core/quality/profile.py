@@ -95,7 +95,7 @@ def profile_file(path: str) -> TableProfile:
     """Profile a CSV/Excel file without leaving DuckDB."""
     conn = duckdb.connect(database=":memory:")
     try:
-        load_table(conn, path, "t", keep_na_strings=True)
+        load_table(conn, path, "t", raw=True)
         return profile_table(conn, "t")
     finally:
         conn.close()

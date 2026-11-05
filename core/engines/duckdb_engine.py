@@ -14,22 +14,27 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def load_table(conn: duckdb.DuckDBPyConnection, path: str, table: str, keep_na_strings: bool = False):
+def load_table(conn: duckdb.DuckDBPyConnection, path: str, table: str, raw: bool = False):
     """Load a CSV/Excel file into an in-memory DuckDB table.
 
-    By default Excel is read with pandas' defaults, which turn the text "N/A", "NA", "null"... into NULL.
-    keep_na_strings=True keeps those tokens as text (only empty cells are NULL), which is how CSV is
-    read; data quality checks need it so a literal "N/A" is reported rather than hidden.
+    By default DuckDB guesses CSV column types from its first rows (a late "N/A" in a numeric-looking column
+    then fails the load) and pandas turns the Excel text "N/A", "NA", "null"... into NULL.
+
+    raw=True loads every value as text and only empty cells as NULL, for both formats. Data quality checks
+    use it so a literal "N/A" or a late bad value is reported rather than hidden or fatal; types are then
+    inferred from the values with the same Kind rules the comparison engines use.
     """
     if path.lower().endswith((".xls", ".xlsx")):
         # Excel tops out at ~1M rows, so pandas is fine here and avoids needing
         # a network download of a DuckDB extension on every run.
-        frame = pd.read_excel(path, keep_default_na=False, na_values=[""]) if keep_na_strings else pd.read_excel(path)
+        frame = (pd.read_excel(path, dtype=str, keep_default_na=False, na_values=[""]) if raw
+                 else pd.read_excel(path))
         conn.register(f"{table}_df", frame)
         conn.execute(f"CREATE TABLE {table} AS SELECT * FROM {table}_df")
         conn.unregister(f"{table}_df")
     else:
-        conn.execute(f"CREATE TABLE {table} AS SELECT * FROM read_csv_auto({_sql_literal(path)})")
+        options = ", all_varchar=true" if raw else ""
+        conn.execute(f"CREATE TABLE {table} AS SELECT * FROM read_csv_auto({_sql_literal(path)}{options})")
 
 
 class DuckDBEngine:

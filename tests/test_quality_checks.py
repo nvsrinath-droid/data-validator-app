@@ -200,7 +200,7 @@ def test_iqr_outliers_and_worst_first_sample(tmp_path):
     frame = pd.DataFrame({"Amt": [10, 11, 12, 13, 14, 15, 16, 17, 500, -300]})
     r = only(run_both(tmp_path, frame, [Outliers(column="Amt")]))
     assert (r.status, r.violations) == ("fail", 2)
-    assert sorted(r.sample["value"]) == [-300, 500]
+    assert sorted(float(v) for v in r.sample["value"]) == [-300, 500]
     assert only(run_both(tmp_path, frame, [Outliers(column="Amt", max_count=2)])).status == "pass"
 
 
