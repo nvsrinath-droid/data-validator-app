@@ -258,3 +258,43 @@ def test_refusal_message_mentions_drift(cli, orders, tmp_path):
     baseline, ok = saved_baseline(cli, orders, tmp_path)
     code, out = cli(orders, "--quality", ok, "--save-baseline", baseline)
     assert code == 2 and "has not drifted" in out
+
+
+# ---- --strict: an inconclusive result exits non-zero ------------------------------------------------------------
+
+@pytest.fixture
+def mostly_zeros(tmp_path):
+    """80% zeros: the IQR outlier check on Amt is inconclusive."""
+    path = tmp_path / "zeros.csv"
+    pd.DataFrame({"Amt": [0] * 80 + list(range(1, 21))}).to_csv(path, index=False)
+    return path
+
+
+def test_inconclusive_exits_zero_by_default(cli, mostly_zeros, tmp_path):
+    checks = write_checks(tmp_path, [{"type": "outliers", "column": "Amt"}])
+    code, out = cli(mostly_zeros, "--quality", checks)
+    assert code == 0 and "[INCL]" in out and "1 inconclusive" in out
+
+
+def test_strict_makes_inconclusive_exit_one(cli, mostly_zeros, tmp_path):
+    checks = write_checks(tmp_path, [{"type": "outliers", "column": "Amt"}])
+    code, out = cli(mostly_zeros, "--quality", checks, "--strict")
+    assert code == 1 and "[INCL]" in out and "--strict" in out and "inconclusive" in out
+
+
+def test_strict_does_not_change_other_outcomes(cli, mostly_zeros, orders, tmp_path):
+    passing = write_checks(tmp_path, [{"type": "null_rate", "column": "Amt"}], name="pass.json")
+    assert cli(mostly_zeros, "--quality", passing, "--strict")[0] == 0
+    warn = write_checks(tmp_path, [{"type": "distinct", "column": "ID", "unique": True, "severity": "warn"}], name="warn.json")
+    assert cli(orders, "--quality", warn, "--strict")[0] == 0                 # warn results never fail the run
+    failing = write_checks(tmp_path, [{"type": "distinct", "column": "ID", "unique": True}], name="fail.json")
+    assert cli(orders, "--quality", failing, "--strict")[0] == 1
+    assert cli(orders, "--quality", failing)[0] == 1
+    bad = write_checks(tmp_path, [{"type": "run_sql", "column": "ID"}], name="bad.json")
+    assert cli(orders, "--quality", bad, "--strict")[0] == 2
+
+
+def test_strict_with_the_zscore_method_passes(cli, mostly_zeros, tmp_path):
+    """The suggested way out of an inconclusive IQR check keeps a --strict pipeline green."""
+    checks = write_checks(tmp_path, [{"type": "outliers", "column": "Amt", "method": "zscore", "k": 4}])
+    assert cli(mostly_zeros, "--quality", checks, "--strict")[0] == 0

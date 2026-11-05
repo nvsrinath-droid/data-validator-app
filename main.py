@@ -60,6 +60,8 @@ def main() -> int:
                          help="Allow --save-baseline to replace an existing file (only when no check fails and the data has not drifted)")
     quality.add_argument("--as-of", help="'Now' for freshness checks, ISO format. Everything is UTC: a value with an "
                                          "offset is converted, one without is taken as UTC (default: current UTC time)")
+    quality.add_argument("--strict", action="store_true",
+                         help="Exit 1 when a check is inconclusive (by default inconclusive and warn results exit 0)")
     quality.add_argument("--explain", action="store_true", help="Ask the LLM to explain the results (counts only)")
     quality.add_argument("--include-extremes", action="store_true",
                          help="Also send each column's min/max and the freshness age to the LLM (off by default)")

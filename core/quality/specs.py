@@ -164,3 +164,7 @@ class QualityResult:
     @property
     def has_failures(self) -> bool:
         return any(r.status in ("fail", "error") for r in self.results)
+
+    @property
+    def has_inconclusive(self) -> bool:
+        return any(r.status == "inconclusive" for r in self.results)

@@ -5,8 +5,9 @@
     python main.py data.csv --quality checks.json [--ref customers=customers.csv] [--baseline b.json]
                             [--save-baseline b.json] [--as-of 2024-01-16T12:00:00] [--explain --model ...]
 
-Exits 0 when no check failed (warnings are reported but do not fail), 1 when a check failed or errored,
-2 on usage errors. Baselines hold column statistics: keep them outside the repository.
+Exits 0 when no check failed (warn and inconclusive results are reported but do not fail), 1 when a check failed
+or errored (or, with --strict, was inconclusive), 2 on usage errors.
+Baselines hold column statistics: keep them outside the repository.
 """
 import json
 import os
@@ -144,4 +145,9 @@ def quality_main(args, agent: Optional[AIAgent]) -> int:
                 print(agent.explain_results(result, args.include_extremes, args.hide_column_names))
             except Exception as e:
                 print(f"Could not get an explanation: {e}")
-    return 1 if result.has_failures else 0
+    if result.has_failures:
+        return 1
+    if args.strict and result.has_inconclusive:
+        print("\n--strict: a check was inconclusive, so the run fails.")
+        return 1
+    return 0

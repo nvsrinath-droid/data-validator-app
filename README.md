@@ -196,6 +196,26 @@ python main.py source.csv target.csv --model anthropic/claude-opus-5 --auto   # 
 
 Reports (JSON, Excel, CSV) are written to `output/`. The exit code is `0` when everything reconciles, `1` when exceptions are found and `2` on errors.
 
+#### Data quality checks (one table)
+
+```bash
+python main.py data.csv --profile                                   # column profile
+python main.py data.csv --quality checks.json --ref customers=customers.csv
+python main.py data.csv --quality checks.json --strict              # inconclusive results fail the run too
+```
+
+The exit code is a gate for pipelines:
+
+| Exit code | Meaning |
+|---|---|
+| `0` | No check failed. `warn` results (checks with `"severity": "warn"`) and `inconclusive` results are printed, and counted in the summary line, but do not fail the run. |
+| `1` | At least one check failed, or could not run (`error`, for example an unknown column). With `--strict`, an `inconclusive` result also gives `1`. |
+| `2` | Usage or configuration error: an unreadable file, an invalid checks file, a bad `--ref` or `--as-of`, or `--save-baseline` pointing at an existing file without `--overwrite-baseline`. |
+
+An `inconclusive` result means the check cannot give a meaningful answer for that data. Today that is the IQR outlier method on a column where about half or more of the values are equal (the quartiles coincide, so every other value would be flagged); the message says so and suggests the `zscore` method. Because it is not a failure, a real outlier in such a column is not reported by default. Use `--strict`, or switch that check to `zscore`, when the pipeline must not miss it.
+
+Freshness is computed in UTC: timestamps with an offset (`2026-11-04T10:00:00+05:00`, `...Z`, `...+0530`) are converted to UTC, text without an offset is taken as UTC, and `--as-of` defaults to the current UTC time.
+
 ### Tests
 
 ```bash

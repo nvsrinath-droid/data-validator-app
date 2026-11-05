@@ -128,7 +128,7 @@ def test_oversized_age_in_a_check_file_is_a_clean_cli_error(tmp_path, capsys):
     checks.write_text(json.dumps({"checks": [{"type": "freshness", "column": "D", "max_age": "99999999999d"}]}))
     data = write(tmp_path, pd.DataFrame({"D": ["2024-01-01"]}), "csv")
     args = SimpleNamespace(profile=False, suggest_checks=False, quality=str(checks), file1=data, ref=None,
-                           as_of=None, baseline=None, save_baseline=None, output=str(tmp_path / "o"), explain=False)
+                           as_of=None, baseline=None, save_baseline=None, output=str(tmp_path / "o"), explain=False, strict=False)
     assert quality_main(args, None) == 2
     assert "Configuration error" in capsys.readouterr().out
 
@@ -202,7 +202,7 @@ def test_inconclusive_is_reported_by_the_cli_without_failing_the_run(tmp_path, c
     checks.write_text(json.dumps({"checks": [{"type": "outliers", "column": "Amt"}]}))
     data = write(tmp_path, pd.DataFrame({"Amt": tied(80, 0, range(1, 21))}), "csv")
     args = SimpleNamespace(profile=False, suggest_checks=False, quality=str(checks), file1=data, ref=None,
-                           as_of=None, baseline=None, save_baseline=None, output=str(tmp_path / "o"), explain=False)
+                           as_of=None, baseline=None, save_baseline=None, output=str(tmp_path / "o"), explain=False, strict=False)
     assert quality_main(args, None) == 0
     out = capsys.readouterr().out
     assert "[INCL]" in out and "1 inconclusive" in out and "0 failed" in out
