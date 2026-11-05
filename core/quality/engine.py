@@ -4,7 +4,7 @@ Only counts, a handful of statistics and a capped sample of offending values com
 the sample is for the local user and is never put into an LLM prompt (see ai/quality_summary.py).
 """
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Optional, Union
 
 import duckdb
@@ -130,8 +130,8 @@ def _freshness(ctx: _Context, c: Freshness) -> CheckResult:
     ok = age <= c.max_age_delta
     note = " The newest value is in the future." if hours < 0 else ""
     return CheckResult(c, _status(ok, c.severity), hours, 0 if ok else 1,
-                       f"Newest {c.column} is {newest:%Y-%m-%d %H:%M:%S}, {hours:.1f}h before "
-                       f"{ctx.as_of:%Y-%m-%d %H:%M:%S} (limit {c.max_age}).{note}")
+                       f"Newest {c.column} is {newest:%Y-%m-%d %H:%M:%S} UTC, {hours:.1f}h before "
+                       f"{ctx.as_of:%Y-%m-%d %H:%M:%S} UTC (limit {c.max_age}).{note}")
 
 
 def _ref_integrity(ctx: _Context, c: RefIntegrity) -> CheckResult:
@@ -205,7 +205,9 @@ class QualityEngine:
     references  - name -> file path, for ref_integrity checks. Paths come from the caller, never from a spec.
     baseline    - a saved TableProfile: supplies the type for type_drift checks without `expected`,
                   and column-level drift is reported in result.warnings
-    as_of       - "now" for freshness checks (naive datetime); pass a fixed value to make runs reproducible
+    as_of       - "now" for freshness checks; pass a fixed value to make runs reproducible. Everything is UTC:
+                  timestamps with an offset are converted to UTC, text without one is taken as UTC, an aware
+                  as_of is converted to UTC, a naive as_of is taken as UTC, and the default is the current UTC time
     """
 
     def __init__(self, checks: Union[QualityConfig, Iterable[CheckSpec]], references: Optional[Dict[str, str]] = None,
@@ -215,8 +217,8 @@ class QualityEngine:
         self.references = dict(references or {})
         self.baseline = baseline
         if as_of is not None and as_of.tzinfo is not None:
-            raise ValueError("as_of must be a naive datetime (values are compared without time zones)")
-        self.as_of = as_of or datetime.now()
+            as_of = as_of.astimezone(timezone.utc).replace(tzinfo=None)
+        self.as_of = as_of or datetime.now(timezone.utc).replace(tzinfo=None)
         self.sample_limit = sample_limit
 
     def run(self, path: str) -> QualityResult:

@@ -15,7 +15,29 @@ from core.engines.duckdb_engine import load_table
 from core.engines.sql_builder import DuckDBDialect, normalize_expr
 from core.normalize import INFERENCE_SAMPLE, Kind, infer_kind
 
-DIALECT = DuckDBDialect()
+# A timestamp written with an explicit UTC offset: ...T10:00:00+05:00, ...10:00Z, ...10:00:00.25-0800, ...10:00 +05
+_OFFSET_SUFFIX = r"[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?\s*(Z|[+-]\d{2}(:?\d{2})?)$"
+
+
+class QualityDialect(DuckDBDialect):
+    """DuckDB, except that timestamps carrying a UTC offset are converted to UTC instead of the offset being
+    dropped (the shared dialect casts to a naive TIMESTAMP). Text without an offset is taken as it is, which
+    makes every parsed timestamp a UTC wall-clock value, whatever time zone the machine or DuckDB session uses.
+    Only quality checks use this; the comparison engines keep their own date handling."""
+
+    def to_ts(self, e):
+        text = f"TRIM(CAST({e} AS VARCHAR))"
+        # tidy what DuckDB cannot parse: a space before the offset ("10:00 +05:00"), missing seconds
+        # ("T10:00+05:00", "T10:00Z") and an offset without a colon ("+0530")
+        squeezed = "regexp_replace(" + text + r", '\s+([Z+-])', '\1')"
+        seconds = "regexp_replace(" + squeezed + r", '([T ]\d{2}:\d{2})([Z+-])', '\1:00\2')"
+        aware = "regexp_replace(" + seconds + r", '([+-]\d{2})(\d{2})$', '\1:\2')"
+        return ("(CASE WHEN regexp_matches(" + text + ", '" + _OFFSET_SUFFIX + "') "
+                "THEN CAST(timezone('UTC', TRY_CAST(" + aware + " AS TIMESTAMPTZ)) AS TIMESTAMP) "
+                "ELSE TRY_CAST(" + text + " AS TIMESTAMP) END)")
+
+
+DIALECT = QualityDialect()
 
 
 class ColumnProfile(BaseModel):

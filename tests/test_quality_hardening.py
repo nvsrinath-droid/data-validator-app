@@ -457,3 +457,99 @@ def test_unverified_reference_names_and_columns_are_masked(tmp_path):
     first = result_summary(result)["checks"][0]["check"]
     assert (first["ref_name"], first["ref_column"]) == ("customers", "ID")
     assert "ID" not in json.dumps(result_summary(result, hide_names=True)["checks"][0]["check"]["ref_column"])
+
+
+# ---- re-review #3: timestamps with a UTC offset are converted to UTC, so freshness is correct ------------------
+
+from datetime import timedelta, timezone  # noqa: E402
+
+from core.quality.specs import Freshness  # noqa: E402
+
+AS_OF_UTC = datetime(2026, 11, 4, 12, 0, 0)
+
+
+def newest_age_hours(tmp_path, values, fmt="csv", max_age="1000d", as_of=AS_OF_UTC):
+    path = write(tmp_path, pd.DataFrame({"D": values}), fmt)
+    r = only(QualityEngine([Freshness(column="D", max_age=max_age)], as_of=as_of).run(path))
+    return r.metric, r
+
+
+@pytest.mark.parametrize("value,expected_utc_hour", [
+    ("2026-11-04T10:00:00+05:00", 5.0),       # 05:00 UTC -> 7h before 12:00
+    ("2026-11-04T10:00:00-08:00", 18.0),      # 18:00 UTC -> 6h in the future
+    ("2026-11-04T01:00:00Z", 1.0),
+    ("2026-11-04 10:00:00 +05:00", 5.0),      # space before the offset
+    ("2026-11-04T10:00+05:30", 4.5),          # no seconds, half-hour offset
+    ("2026-11-04T10:00Z", 10.0),
+    ("2026-11-04T10:00:00+0530", 4.5),        # offset without a colon
+    ("2026-11-04T10:00:00.250-08", 18.00007),  # fractional seconds, hour-only offset
+    ("2026-11-04 10:00:00", 10.0),            # no offset: taken as UTC, unchanged
+    ("2026-11-04", 0.0),
+])
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_offsets_are_converted_to_utc(tmp_path, value, expected_utc_hour, fmt):
+    metric, r = newest_age_hours(tmp_path, [value], fmt)
+    assert metric == pytest.approx(12.0 - expected_utc_hour, abs=1e-3), r.message
+    assert "UTC" in r.message
+
+
+def test_the_newest_value_is_chosen_after_conversion(tmp_path):
+    # 23:00-08:00 on Nov 4 is 07:00 UTC on Nov 5, later than the plain 03:00 on Nov 5.
+    metric, r = newest_age_hours(tmp_path, ["2026-11-04T23:00:00-08:00", "2026-11-05 03:00:00", "2026-11-04T20:00:00+00:00"],
+                                 as_of=datetime(2026, 11, 5, 12, 0, 0))
+    assert metric == pytest.approx(5.0) and "2026-11-05 07:00:00 UTC" in r.message
+
+
+def test_the_result_does_not_depend_on_the_machines_time_zone(tmp_path, monkeypatch):
+    import duckdb
+    results = []
+    real_connect = duckdb.connect
+
+    def connect_in(tz):
+        def _connect(*a, **k):
+            conn = real_connect(*a, **k)
+            conn.execute(f"SET TimeZone='{tz}'")
+            return conn
+        return _connect
+
+    for tz in ("UTC", "America/Los_Angeles", "Asia/Kolkata"):
+        monkeypatch.setattr("core.quality.engine.duckdb.connect", connect_in(tz))
+        results.append(newest_age_hours(tmp_path, ["2026-11-04T10:00:00+05:00", "2026-11-04 03:00:00"])[0])
+    assert results == [pytest.approx(7.0)] * 3
+
+
+def test_freshness_passes_and_fails_on_the_converted_age(tmp_path):
+    value = ["2026-11-04T10:00:00+05:00"]                     # 05:00 UTC, 7h before AS_OF_UTC
+    assert only(QualityEngine([Freshness(column="D", max_age="8h")], as_of=AS_OF_UTC).run(
+        write(tmp_path, pd.DataFrame({"D": value}), "csv"))).status == "pass"
+    assert only(QualityEngine([Freshness(column="D", max_age="6h")], as_of=AS_OF_UTC).run(
+        write(tmp_path, pd.DataFrame({"D": value}), "csv"))).status == "fail"
+    # the old behaviour dropped the offset: 10:00 looked 2h old and a 6h limit would have passed
+
+
+def test_default_now_is_utc_whatever_the_offset_of_the_data(tmp_path):
+    now = datetime.now(timezone.utc)
+    one_hour_ago = now - timedelta(hours=1)
+    for tz_hours in (0, 5, -8):
+        local = one_hour_ago.astimezone(timezone(timedelta(hours=tz_hours)))
+        value = local.strftime("%Y-%m-%dT%H:%M:%S%z")                       # e.g. 2026-11-04T10:00:00+0500
+        metric, _ = newest_age_hours(tmp_path, [value], as_of=None)
+        assert metric == pytest.approx(1.0, abs=0.2), (value, metric)
+
+
+def test_an_aware_as_of_is_converted_to_utc(tmp_path):
+    data = write(tmp_path, pd.DataFrame({"D": ["2026-11-04 05:00:00"]}), "csv")
+    aware = datetime(2026, 11, 4, 17, 0, 0, tzinfo=timezone(timedelta(hours=5)))            # = 12:00 UTC
+    r = only(QualityEngine([Freshness(column="D")], as_of=aware).run(data))
+    assert r.metric == pytest.approx(7.0)
+
+
+def test_type_drift_accepts_offsets_as_dates_and_still_catches_junk(tmp_path):
+    frame = pd.DataFrame({"D": ["2026-11-04T10:00:00+05:00", "2026-11-04T01:00:00Z", "2026-11-04 10:00:00", "bad+05:00"]})
+    r = only(QualityEngine([TypeDrift(column="D", expected=Kind.DATE)]).run(write(tmp_path, frame, "csv")))
+    assert (r.status, r.violations) == ("fail", 1) and list(r.sample["value"]) == ["bad+05:00"]
+
+
+def test_the_comparison_engines_date_handling_is_untouched():
+    from core.engines.sql_builder import DuckDBDialect
+    assert "timezone" not in DuckDBDialect().to_ts("x")

@@ -1,5 +1,5 @@
 """Quality checks end to end. Every scenario runs from CSV and from XLSX, which must agree."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
@@ -253,6 +253,7 @@ def test_samples_are_capped(tmp_path):
     assert list(r.sample.columns) == ["_row", "value"]          # only the checked column, never the whole row
 
 
-def test_aware_as_of_is_rejected():
-    with pytest.raises(ValueError, match="naive"):
-        QualityEngine([], as_of=datetime(2024, 1, 1, tzinfo=timezone.utc))
+def test_naive_and_aware_as_of_mean_the_same_instant_in_utc():
+    naive = QualityEngine([], as_of=datetime(2024, 1, 1, 12, 0))
+    aware = QualityEngine([], as_of=datetime(2024, 1, 1, 14, 0, tzinfo=timezone(timedelta(hours=2))))
+    assert naive.as_of == aware.as_of == datetime(2024, 1, 1, 12, 0)
