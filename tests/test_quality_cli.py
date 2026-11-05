@@ -212,3 +212,49 @@ def test_explain_masks_a_column_name_that_is_not_in_the_table(cli, orders, tmp_p
         calls.clear()
         code, _ = cli(orders, "--quality", checks, "--explain", "--api-key", "k", "--model", "openai/gpt-5", *extra)
         assert code == 1 and "Typo_SSN" not in json.dumps(calls[0]["messages"])
+
+
+# ---- re-review #2: drift reported only as warnings must not let --overwrite-baseline replace the baseline ----
+
+def saved_baseline(cli, orders, tmp_path):
+    baseline = tmp_path / "orders.baseline.json"
+    ok = write_checks(tmp_path, [{"type": "null_rate", "column": "Amt", "max_pct": 100}], name="ok.json")
+    assert cli(orders, "--quality", ok, "--save-baseline", baseline)[0] == 0
+    return baseline, ok
+
+
+def test_overwrite_keeps_the_baseline_when_a_column_disappears(cli, orders, tmp_path):
+    baseline, ok = saved_baseline(cli, orders, tmp_path)
+    before = baseline.read_bytes()
+    narrower = tmp_path / "narrower.csv"
+    pd.DataFrame({"ID": [1, 2], "Amt": [10, 12]}).to_csv(narrower, index=False)       # Cust and Updated are gone
+    code, out = cli(narrower, "--quality", ok, "--baseline", baseline, "--save-baseline", baseline, "--overwrite-baseline")
+    assert code == 0                                    # no check failed: the drift is only a warning...
+    assert "was in the baseline but is missing" in out and "Kept the existing baseline" in out
+    assert "drifted" in out and baseline.read_bytes() == before                       # ...yet the baseline is protected
+
+
+def test_overwrite_keeps_the_baseline_when_nulls_jump(cli, orders, tmp_path):
+    baseline, ok = saved_baseline(cli, orders, tmp_path)
+    before = baseline.read_bytes()
+    holey = tmp_path / "holey.csv"
+    pd.DataFrame({"ID": [1, 2, 3, 4], "Cust": ["C1", None, None, None], "Amt": [1, 2, 3, 4],
+                  "Updated": ["2024-01-15"] * 4}).to_csv(holey, index=False)
+    code, out = cli(holey, "--quality", ok, "--baseline", baseline, "--save-baseline", baseline, "--overwrite-baseline")
+    assert code == 0 and "null rate rose" in out and baseline.read_bytes() == before
+
+
+def test_overwrite_replaces_the_baseline_when_there_is_no_drift(cli, orders, tmp_path):
+    baseline, ok = saved_baseline(cli, orders, tmp_path)
+    before = baseline.read_bytes()
+    more = tmp_path / "more.csv"                        # same shape, more rows
+    pd.DataFrame({"ID": range(8), "Cust": ["C1"] * 8, "Amt": range(8), "Updated": ["2024-01-15 10:00:00"] * 8}
+                 ).to_csv(more, index=False)
+    code, out = cli(more, "--quality", ok, "--baseline", baseline, "--save-baseline", baseline, "--overwrite-baseline")
+    assert code == 0 and "Saved baseline" in out and baseline.read_bytes() != before
+
+
+def test_refusal_message_mentions_drift(cli, orders, tmp_path):
+    baseline, ok = saved_baseline(cli, orders, tmp_path)
+    code, out = cli(orders, "--quality", ok, "--save-baseline", baseline)
+    assert code == 2 and "has not drifted" in out

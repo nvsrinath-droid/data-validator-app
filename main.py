@@ -57,7 +57,7 @@ def main() -> int:
     quality.add_argument("--baseline", help="Saved profile used for type drift and column drift")
     quality.add_argument("--save-baseline", help="Write file1's profile here (keep it outside the repo)")
     quality.add_argument("--overwrite-baseline", action="store_true",
-                         help="Allow --save-baseline to replace an existing file (only when no check fails)")
+                         help="Allow --save-baseline to replace an existing file (only when no check fails and the data has not drifted)")
     quality.add_argument("--as-of", help="'Now' for freshness checks, ISO format (default: current time)")
     quality.add_argument("--explain", action="store_true", help="Ask the LLM to explain the results (counts only)")
     quality.add_argument("--include-extremes", action="store_true",

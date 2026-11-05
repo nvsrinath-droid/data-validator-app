@@ -109,7 +109,8 @@ def quality_main(args, agent: Optional[AIAgent]) -> int:
         # Checked before the run: a baseline is the reference a later run is judged against, so a stray
         # --save-baseline (or the same path as --baseline) must not silently replace it.
         print(f"Refusing to overwrite the existing baseline {args.save_baseline}. "
-              f"Pass --overwrite-baseline to replace it (this only happens when no check fails).")
+              f"Pass --overwrite-baseline to replace it (this only happens when no check fails and the data "
+              f"has not drifted from it).")
         return 2
 
     try:
@@ -123,9 +124,12 @@ def quality_main(args, agent: Optional[AIAgent]) -> int:
 
     print_result(result)
     if args.save_baseline:
-        if existing_baseline and result.has_failures:
-            print(f"\nKept the existing baseline {args.save_baseline}: checks failed, so this run is not a "
-                  f"good reference.")
+        if existing_baseline and (result.has_failures or result.warnings):
+            # warnings are baseline drift (a column added/removed, a type change, a jump in nulls): the same
+            # signal a type_drift check reports, so a drifted run is not a good reference either.
+            why = "checks failed" if result.has_failures else "the data drifted from it"
+            print(f"\nKept the existing baseline {args.save_baseline}: {why}. To accept the new shape on purpose, "
+                  f"delete the baseline (or run without --baseline) and save a new one.")
         else:
             save_baseline(profile_file(args.file1), args.save_baseline)
             print(f"\nSaved baseline to {args.save_baseline}")
