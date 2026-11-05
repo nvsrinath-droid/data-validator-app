@@ -144,3 +144,61 @@ def test_reconcile_mode_still_requires_a_target(cli, orders):
     with pytest.raises(SystemExit) as exc:
         cli(orders)
     assert exc.value.code == 2
+
+
+# ---- a good baseline must not be overwritten by accident (review finding #13) -----------------
+
+def drifted_file(tmp_path):
+    path = tmp_path / "drifted.csv"
+    pd.DataFrame({"ID": [1, 2], "Cust": ["C1", "C2"], "Amt": ["10", "twelve"], "Updated": ["2024-01-15"] * 2}
+                 ).to_csv(path, index=False)
+    return path
+
+
+def test_new_baseline_is_saved_even_from_a_failing_run(cli, orders, tmp_path):
+    baseline = tmp_path / "b" / "orders.baseline.json"
+    checks = write_checks(tmp_path, [{"type": "distinct", "column": "ID", "unique": True}])      # fails: ID 3 repeats
+    code, out = cli(orders, "--quality", checks, "--save-baseline", baseline)
+    assert code == 1 and baseline.exists() and "Saved baseline" in out
+
+
+def test_save_baseline_refuses_to_replace_an_existing_file(cli, orders, tmp_path):
+    baseline = tmp_path / "orders.baseline.json"
+    checks = write_checks(tmp_path, [{"type": "null_rate", "column": "Amt"}])
+    assert cli(orders, "--quality", checks, "--save-baseline", baseline)[0] == 0
+    before = baseline.read_bytes()
+    code, out = cli(drifted_file(tmp_path), "--quality", checks, "--save-baseline", baseline)
+    assert code == 2 and "Refusing to overwrite" in out and baseline.read_bytes() == before
+
+
+def test_same_path_for_baseline_and_save_baseline_cannot_replace_a_good_baseline(cli, orders, tmp_path):
+    """The review repro: comparing against a baseline and saving to it in one run replaced it with the drifted profile."""
+    baseline = tmp_path / "orders.baseline.json"
+    ok = write_checks(tmp_path, [{"type": "null_rate", "column": "Amt"}], name="ok.json")
+    assert cli(orders, "--quality", ok, "--save-baseline", baseline)[0] == 0
+    before = baseline.read_bytes()
+    drift = write_checks(tmp_path, [{"type": "type_drift", "column": "Amt"}], name="drift.json")
+    code, _ = cli(drifted_file(tmp_path), "--quality", drift, "--baseline", baseline, "--save-baseline", baseline)
+    assert code == 2 and baseline.read_bytes() == before
+
+
+def test_overwrite_keeps_the_baseline_when_checks_fail(cli, orders, tmp_path):
+    baseline = tmp_path / "orders.baseline.json"
+    ok = write_checks(tmp_path, [{"type": "null_rate", "column": "Amt"}], name="ok.json")
+    assert cli(orders, "--quality", ok, "--save-baseline", baseline)[0] == 0
+    before = baseline.read_bytes()
+    drift = write_checks(tmp_path, [{"type": "type_drift", "column": "Amt"}], name="drift.json")
+    code, out = cli(drifted_file(tmp_path), "--quality", drift, "--baseline", baseline,
+                    "--save-baseline", baseline, "--overwrite-baseline")
+    assert code == 1 and "Kept the existing baseline" in out and baseline.read_bytes() == before
+
+
+def test_overwrite_replaces_the_baseline_after_a_passing_run(cli, orders, tmp_path):
+    baseline = tmp_path / "orders.baseline.json"
+    ok = write_checks(tmp_path, [{"type": "null_rate", "column": "Amt"}], name="ok.json")
+    assert cli(orders, "--quality", ok, "--save-baseline", baseline)[0] == 0
+    before = baseline.read_bytes()
+    grown = tmp_path / "grown.csv"
+    pd.DataFrame({"ID": range(10), "Cust": ["C1"] * 10, "Amt": range(10), "Updated": ["2024-01-15"] * 10}).to_csv(grown, index=False)
+    code, out = cli(grown, "--quality", ok, "--save-baseline", baseline, "--overwrite-baseline")
+    assert code == 0 and "Saved baseline" in out and baseline.read_bytes() != before

@@ -104,6 +104,14 @@ def quality_main(args, agent: Optional[AIAgent]) -> int:
         print(QualityConfig(checks=checks).model_dump_json(indent=2, exclude_none=True))
         return 0
 
+    existing_baseline = bool(args.save_baseline) and Path(args.save_baseline).exists()
+    if existing_baseline and not args.overwrite_baseline:
+        # Checked before the run: a baseline is the reference a later run is judged against, so a stray
+        # --save-baseline (or the same path as --baseline) must not silently replace it.
+        print(f"Refusing to overwrite the existing baseline {args.save_baseline}. "
+              f"Pass --overwrite-baseline to replace it (this only happens when no check fails).")
+        return 2
+
     try:
         config = QualityConfig.model_validate_json(Path(args.quality).read_text(encoding="utf-8"))
         baseline = load_baseline(args.baseline) if args.baseline else None
@@ -113,10 +121,14 @@ def quality_main(args, agent: Optional[AIAgent]) -> int:
         print(f"Configuration error: {e}")
         return 2
 
-    if args.save_baseline:
-        save_baseline(profile_file(args.file1), args.save_baseline)
-        print(f"Saved baseline to {args.save_baseline}")
     print_result(result)
+    if args.save_baseline:
+        if existing_baseline and result.has_failures:
+            print(f"\nKept the existing baseline {args.save_baseline}: checks failed, so this run is not a "
+                  f"good reference.")
+        else:
+            save_baseline(profile_file(args.file1), args.save_baseline)
+            print(f"\nSaved baseline to {args.save_baseline}")
     print(f"\nReport: {write_report(result, args.output)}")
 
     if args.explain:
