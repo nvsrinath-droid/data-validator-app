@@ -50,6 +50,28 @@ def test_grid_ignores_blank_rows():
     assert frame_to_specs(frame, ["a"]) == ([], [])
 
 
+def test_grid_rejects_contradictory_and_extreme_values_and_never_raises():
+    frame = pd.DataFrame([
+        {"type": "distinct", "column": "a", "min_distinct": 5.0, "max_distinct": 1.0},
+        {"type": "distinct", "column": "a", "min_distinct": 1e300},
+        {"type": "outliers", "column": "a", "max_count": 1e13},
+        {"type": ["x"], "column": "a"},
+        {"type": "null_rate", "column": ["a"]},
+        {"type": "distinct", "column": "a", "min_distinct": 1.0, "max_distinct": 5.0},
+    ])
+    specs, errors = frame_to_specs(frame, ["a"])
+    assert [(s.min_distinct, s.max_distinct) for s in specs] == [(1, 5)]
+    assert len(errors) == 5
+    assert "greater than max_distinct" in errors[0] and "too large" in errors[1] and "too large" in errors[2]
+    assert all(len(e) < 200 for e in errors)
+
+
+def test_non_blank_rows_keeps_error_rows_and_drops_blank_ones():
+    from ui.quality_grid import non_blank_rows
+    frame = pd.DataFrame([{"type": "ref_integrity", "column": "a"}, {"column": None}, {"unique": False}])
+    assert list(non_blank_rows(frame)["type"]) == ["ref_integrity"]
+
+
 # ---- the page ----------------------------------------------------------------------------------
 
 class FakeAgent:
@@ -141,6 +163,47 @@ def test_suggest_loads_the_grid_and_never_runs(monkeypatch):
     assert list(grid["type"]) == ["null_rate"] and list(grid["column"]) == [FIRST]
     assert any("Dropped something." in i.value for i in at.info)
     assert "Only column statistics are sent, no rows." in [c.value for c in at.caption]
+
+
+def test_suggest_keeps_rows_that_have_errors(monkeypatch):
+    at = _load(_app(FakeAgent(), monkeypatch))
+    at.session_state["quality_checks"] = pd.concat(
+        [pd.DataFrame([{"type": "ref_integrity", "column": FIRST}]), empty_frame()], ignore_index=True)
+    at.session_state["config_version"] += 1
+    at.run()
+    assert any("--ref" in e.value for e in at.error)
+    at.button(key="quality_suggest").click().run()
+    grid = at.session_state["quality_checks"]
+    assert list(grid["type"]) == ["ref_integrity", "null_rate"]     # the bad row survived, suggestion appended
+
+
+def test_changing_the_file_clears_notes_and_explanation(monkeypatch, tmp_path):
+    other = tmp_path / "other.csv"
+    other.write_text("x,y\n1,2\n")
+    at = _load(_app(FakeAgent(), monkeypatch), [NullRate(column=FIRST, max_pct=100)])
+    at.button(key="quality_run").click().run()
+    at.button(key="quality_explain").click().run()
+    at.session_state["quality_notes"] = ["Dropped something about the old file."]
+    at.run()
+    assert at.info and at.session_state["quality_explanation"]
+    at.text_input(key="qfile_0").set_value(str(other)).run()
+    assert not at.exception, at.exception
+    for key in ("quality_notes", "quality_explanation", "quality_result"):
+        assert key not in at.session_state
+    assert not at.info
+
+
+def test_profile_refreshes_when_the_file_changes_in_place(tmp_path):
+    from streamlit.testing.v1 import AppTest
+    f = tmp_path / "data.csv"
+    f.write_text("a\n1\n")
+    at = _app()
+    at.text_input(key="qfile_0").set_value(str(f)).run()
+    assert [c.name for c in at.session_state["quality_profile"].columns] == ["a"]
+    f.write_text("a,b\n1,2\n3,4\n")
+    at.run()
+    prof = at.session_state["quality_profile"]
+    assert [c.name for c in prof.columns] == ["a", "b"] and prof.row_count == 2
 
 
 def test_explain_gets_the_result_object_and_the_flags(monkeypatch):

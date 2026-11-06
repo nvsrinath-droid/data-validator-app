@@ -1,4 +1,6 @@
 """Data quality tier: upload one table, see its profile, review the checks, run them."""
+import os
+
 import pandas as pd
 import streamlit as st
 
@@ -10,7 +12,7 @@ from core.quality.specs import QualityConfig, QualityResult
 
 from ..components import model_picker
 from ..inputs import path_input, resolve_input
-from ..quality_grid import CHECK_TYPES, empty_frame, frame_to_specs, specs_to_frame
+from ..quality_grid import CHECK_TYPES, empty_frame, frame_to_specs, non_blank_rows, specs_to_frame
 
 PRIVACY_NOTE = "Only column statistics are sent, no rows."
 
@@ -24,14 +26,21 @@ def _profile_frame(profile) -> pd.DataFrame:
                          for c in profile.columns])
 
 
+def _source_key(path: str):
+    """Identity of the file's current contents: a local file edited in place gets a new key."""
+    stat = os.stat(path)
+    return (path, stat.st_mtime_ns, stat.st_size)
+
+
 def _load_profile(path: str):
-    """Profile once per file; a different file clears the checks and results made for the previous one."""
+    """Profile once per file version; a different (or changed) file clears everything made for the old one."""
     ss = st.session_state
-    if ss.get("quality_path") != path:
-        for k in ("quality_checks", "quality_result"):
+    key = _source_key(path)
+    if ss.get("quality_source") != key:
+        for k in ("quality_checks", "quality_result", "quality_explanation", "quality_notes"):
             ss.pop(k, None)
         ss.quality_profile = profile_file(path)
-        ss.quality_path = path
+        ss.quality_source = key
     return ss.quality_profile
 
 
@@ -71,7 +80,7 @@ def _ai_options():
     return hide, extremes
 
 
-def _suggest_checks(agent: AIAgent, profile, current_specs, hide: bool, extremes: bool):
+def _suggest_checks(agent: AIAgent, profile, current_rows: pd.DataFrame, hide: bool, extremes: bool):
     """Suggestions are loaded into the grid for review. They are never run from here."""
     ss = st.session_state
     try:
@@ -80,7 +89,8 @@ def _suggest_checks(agent: AIAgent, profile, current_specs, hide: bool, extremes
     except Exception as e:
         st.error(f"Failed to get suggestions: {e}")
         return
-    ss.quality_checks = specs_to_frame(list(current_specs) + list(suggested))
+    # Append to the grid exactly as the user has it, so a row with an error is kept for them to fix.
+    ss.quality_checks = pd.concat([non_blank_rows(current_rows), specs_to_frame(suggested)], ignore_index=True)
     ss.quality_notes = ([f"Added {len(suggested)} suggested check(s) to the grid. Review them, then run."]
                         + list(notes))
     ss.pop("quality_result", None)
@@ -147,7 +157,7 @@ def render():
     try:
         profile = _load_profile(path)
     except Exception as e:  # unreadable file, bad Excel, DuckDB parse error: say so, keep the app alive
-        ss.pop("quality_path", None)
+        ss.pop("quality_source", None)
         st.error(f"Could not read the file: {e}")
         return
 
@@ -167,7 +177,7 @@ def render():
     if agent is not None:
         st.caption(PRIVACY_NOTE)
         if st.button("✨ Suggest checks", key="quality_suggest"):
-            _suggest_checks(agent, profile, specs, hide, extremes)
+            _suggest_checks(agent, profile, edited, hide, extremes)
     for note in ss.get("quality_notes", []):
         st.info(note)
 

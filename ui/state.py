@@ -27,7 +27,7 @@ DEFAULT_MODELS = {"GEMINI_API_KEY": "Google Gemini 3.8 Flash", "OPENAI_API_KEY":
 
 # Per-run workflow state, cleared on restart or when switching tiers
 WORKFLOW_KEYS = ["ai_config", "results", "config_signature", "is_template_loaded", "column_cache", "grid_draft",
-                 "quality_path", "quality_profile", "quality_checks", "quality_result", "quality_explanation", "quality_notes"]
+                 "quality_source", "quality_profile", "quality_checks", "quality_result", "quality_explanation", "quality_notes"]
 
 
 def init_state():
