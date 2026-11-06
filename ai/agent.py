@@ -1,7 +1,9 @@
 import json
+import os
 import warnings
 from typing import List, Optional, Tuple
 
+import litellm
 from litellm import completion, get_llm_provider
 from pydantic import TypeAdapter, ValidationError
 
@@ -22,7 +24,36 @@ def silence_litellm_serializer_warning() -> None:
 
 
 silence_litellm_serializer_warning()
+DEFAULT_LLM_TIMEOUT = 60.0
+TIMEOUT_ENV = "TRUEALIGN_LLM_TIMEOUT"
 MAX_SUGGESTED_CHECKS = 50
+
+
+def llm_timeout() -> float:
+    """Seconds to wait for a provider before giving up. TRUEALIGN_LLM_TIMEOUT overrides the default (60);
+    a value that is not a positive number is ignored rather than turned into "wait forever"."""
+    try:
+        value = float(os.environ.get(TIMEOUT_ENV, ""))
+    except ValueError:
+        return DEFAULT_LLM_TIMEOUT
+    return value if value > 0 and value != float("inf") else DEFAULT_LLM_TIMEOUT
+
+
+def friendly_llm_error(exc: Exception, model: str, timeout: float) -> str:
+    """One plain sentence for the failures a user can act on. Anything else keeps the provider's own text."""
+    if isinstance(exc, litellm.Timeout):          # before APIConnectionError, which it subclasses
+        return (f"{model} did not answer within {timeout:g} seconds. Try again, pick a faster model, or raise "
+                f"{TIMEOUT_ENV}.")
+    if isinstance(exc, litellm.AuthenticationError):
+        return f"The provider rejected the API key for {model}. Check the key in Settings."
+    if isinstance(exc, litellm.RateLimitError):
+        return (f"The provider is rate-limiting {model} (or the account is out of quota). Wait a moment and try "
+                f"again.")
+    if isinstance(exc, litellm.NotFoundError):
+        return f"{model} was not found at the provider. Check the model name."
+    if isinstance(exc, (litellm.APIConnectionError, litellm.ServiceUnavailableError)):
+        return f"Could not reach the provider for {model}. Check your network connection and try again."
+    return ""
 _CHECK_ADAPTER = TypeAdapter(CheckSpec)
 
 
@@ -71,6 +102,7 @@ class AIAgent:
             "model": self.model_name,
             "messages": [{"role": "user", "content": prompt}],
             "api_key": self.api_key,
+            "timeout": llm_timeout(),
         }
         provider = provider_of(self.model_name)
         if provider in TEMPERATURE_PROVIDERS:
@@ -82,7 +114,7 @@ class AIAgent:
             response = completion(**kwargs)
             return response.choices[0].message.content
         except Exception as e:
-            message = str(e)
+            message = friendly_llm_error(e, self.model_name, kwargs["timeout"]) or str(e)
             if self.api_key:
                 message = message.replace(self.api_key, "***")
             raise RuntimeError(f"LLM Provider Error: {message}") from None
