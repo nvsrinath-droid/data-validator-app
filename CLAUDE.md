@@ -46,7 +46,9 @@ omits `ref_integrity` (grid rows are rejected with a pointer to the CLI) and bas
 `AIAgent.suggest_checks` / `explain_results`, which build prompts from `ai/quality_summary.py` (summaries, never
 rows); suggestions load into the grid and never run automatically. `tests/test_quality_ui.py` enforces this.
 Server-side file paths (the "Local File Path" boxes and the SQLite "Database File Path" box) are hidden unless `TRUEALIGN_ALLOW_LOCAL_PATHS=1`, and must be
-.csv/.xlsx/.xls; `ui/inputs.py` enforces both, so new file inputs should use `path_input`/`resolve_input`.
+.csv/.xlsx/.xls; `ui/inputs.py` enforces both, so new file inputs should use `path_input`/`resolve_input`. Uploads go through
+`UploadStore` (private per-session folder, 0600 files, deleted on replace/clear/tier switch/session end), never
+through loose files in the temp dir.
 
 The core invariant: **all three engines must produce the same answer for the same data and config**
 (NULL handling, numeric/string/date normalization, tolerance rules, duplicate keys, missing rows).

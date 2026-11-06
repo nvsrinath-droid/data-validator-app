@@ -1,4 +1,5 @@
 """python main.py <file> --quality / --profile / --suggest-checks, run in process."""
+import codecs
 import json
 import sys
 from types import SimpleNamespace
@@ -95,6 +96,43 @@ def test_missing_files_and_bad_arguments_exit_two(cli, orders, tmp_path):
     checks = write_checks(tmp_path, [])
     assert cli(orders, "--quality", checks, "--ref", "missing-equals")[0] == 2
     assert cli(orders, "--quality", checks, "--as-of", "not a date")[0] == 2
+
+
+def _with_bom(path):
+    path.write_bytes(codecs.BOM_UTF8 + path.read_bytes())
+    return path
+
+
+def test_checks_json_with_a_utf8_bom_is_accepted(cli, orders, tmp_path):
+    """Windows PowerShell 5.1 (Set-Content/Out-File -Encoding utf8) writes a BOM."""
+    checks = _with_bom(write_checks(tmp_path, [{"type": "null_rate", "column": "Amt", "max_pct": 0}]))
+    assert checks.read_bytes().startswith(codecs.BOM_UTF8)
+    code, out = cli(orders, "--quality", checks)
+    assert code == 0 and "1 checks: 1 passed" in out
+
+
+def test_baseline_with_a_utf8_bom_is_accepted(cli, orders, tmp_path):
+    baseline = tmp_path / "b.json"
+    ok = write_checks(tmp_path, [{"type": "null_rate", "column": "Amt", "max_pct": 0}], "ok.json")
+    assert cli(orders, "--quality", ok, "--save-baseline", baseline)[0] == 0
+    _with_bom(baseline)
+    code, out = cli(orders, "--quality", ok, "--baseline", baseline)
+    assert code == 0 and "Configuration error" not in out
+
+
+def test_reconciliation_config_with_a_utf8_bom_is_accepted(tmp_path, monkeypatch, capsys):
+    import shutil
+    from pathlib import Path
+    samples = Path(__file__).resolve().parents[1] / "samples"
+    config = tmp_path / "cfg.json"
+    shutil.copy(samples / "inventory_config.json", config)
+    _with_bom(config)
+    monkeypatch.setattr(main_mod, "load_dotenv", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["main.py", str(samples / "inventory_system.csv"),
+                                      str(samples / "vendor_catalog.csv"), "--config", str(config),
+                                      "--output", str(tmp_path / "out")])
+    assert main_mod.main() == 1                      # the sample data has one real mismatch; the config loaded
+    assert "Mismatched rows:          1" in capsys.readouterr().out
 
 
 def test_baseline_round_trip_detects_type_drift(cli, orders, tmp_path):

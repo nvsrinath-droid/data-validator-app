@@ -80,7 +80,7 @@ def main() -> int:
             else ConnectorPair(FileConnector(args.file1), FileConnector(args.file2)))
 
     if args.config:
-        with open(args.config, encoding="utf-8") as f:
+        with open(args.config, encoding="utf-8-sig") as f:   # tolerate a BOM (PowerShell 5.1 writes one)
             config = ValidationConfig(**json.load(f))
     else:
         if agent is None:

@@ -108,7 +108,7 @@ def quality_main(args, agent: Optional[AIAgent]) -> int:
         return 2
 
     try:
-        config = QualityConfig.model_validate_json(Path(args.quality).read_text(encoding="utf-8"))
+        config = QualityConfig.model_validate_json(Path(args.quality).read_text(encoding="utf-8-sig"))
         baseline = load_baseline(args.baseline) if args.baseline else None
         engine = QualityEngine(config, references=refs, baseline=baseline, as_of=as_of)
         result = engine.run(args.file1)
