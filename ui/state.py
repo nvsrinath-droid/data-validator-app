@@ -3,6 +3,8 @@ import os
 
 import streamlit as st
 
+from .inputs import release_all_inputs
+
 # Display name -> (LiteLLM model string, provider API key name).
 # Provider prefixes make LiteLLM's routing explicit. Checked against LiteLLM's model map on 2026-09-26;
 # retired models (Gemini 1.5, GPT-4o, o1, Claude 3.x, Groq LLaMA 3, Mixtral) were removed.
@@ -65,6 +67,7 @@ def sync_auth_with_url():
 
 
 def clear_workflow():
+    release_all_inputs()    # uploaded temp files are only needed while the page that uses them is open
     for k in WORKFLOW_KEYS:
         st.session_state.pop(k, None)
     st.session_state.ai_config = None

@@ -11,7 +11,7 @@ from core.quality.report import report_json, results_csv
 from core.quality.specs import QualityConfig, QualityResult
 
 from ..components import model_picker
-from ..inputs import local_paths_allowed, path_input, resolve_input
+from ..inputs import local_paths_allowed, path_input, release_input, resolve_input
 from ..quality_grid import CHECK_TYPES, empty_frame, frame_to_specs, new_checks, non_blank_rows, specs_to_frame
 
 PRIVACY_NOTE = "Only column statistics are sent, no rows."
@@ -158,6 +158,8 @@ def render():
     uk = ss.uploader_key
     upload = st.file_uploader("Upload File", type=["csv", "xlsx", "xls"], key=f"qup_{uk}")
     local_path = path_input("OR: Local File Path (if running locally)", f"qfile_{uk}")
+    if not upload:
+        release_input("quality")                # the file was removed from the uploader: delete its temp copy
     if not (upload or local_path):
         return
     path = resolve_input(upload, local_path, "quality")
