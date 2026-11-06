@@ -3,12 +3,12 @@ import streamlit as st
 from core.sources import FilePair
 
 from ..components import render_mapping_workflow
-from ..inputs import path_input, resolve_input
+from ..inputs import local_paths_allowed, path_input, resolve_input
 
 
 def render():
     st.markdown("**🟢 Active Engine:** Massive Data Files (DuckDB, streamed from disk)")
-    st.markdown("Upload the files, or give a file path on the server if you are running the app locally.")
+    st.markdown("Upload the files" + (", or give a file path on the server." if local_paths_allowed() else "."))
 
     uk = st.session_state.uploader_key
     col1, col2 = st.columns(2)

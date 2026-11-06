@@ -7,14 +7,16 @@ import streamlit as st
 from ai.agent import AIAgent
 from core.quality.engine import QualityEngine
 from core.quality.profile import profile_file
-from core.quality.report import report_json, results_frame
+from core.quality.report import report_json, results_csv
 from core.quality.specs import QualityConfig, QualityResult
 
 from ..components import model_picker
-from ..inputs import path_input, resolve_input
+from ..inputs import local_paths_allowed, path_input, resolve_input
 from ..quality_grid import CHECK_TYPES, empty_frame, frame_to_specs, non_blank_rows, specs_to_frame
 
 PRIVACY_NOTE = "Only column statistics are sent, no rows."
+HEADER_WARNING = ("If your file has no header row, its first row is used as the column names, and column names are "
+                  "sent to the AI. Tick **Hide column names** to send placeholders (col_1, col_2, ...) instead.")
 
 STATUS_ICONS = {"pass": "✅", "warn": "⚠️", "fail": "❌", "error": "❌", "inconclusive": "❔"}
 STATUS_ORDER = ["pass", "warn", "fail", "inconclusive", "error"]
@@ -103,7 +105,7 @@ def _downloads(result: QualityResult, specs):
     c1, c2, c3 = st.columns(3)
     c1.download_button("⬇️ Report (JSON)", report_json(result), "quality_report.json", "application/json",
                        key="quality_dl_json", help="Includes the capped violation samples. Stays on your machine.")
-    c2.download_button("⬇️ Results (CSV)", results_frame(result).to_csv(index=False), "quality_results.csv",
+    c2.download_button("⬇️ Results (CSV)", results_csv(result), "quality_results.csv",
                        "text/csv", key="quality_dl_csv")
     if specs:
         c3.download_button("⬇️ Checks (JSON)", QualityConfig(checks=specs).model_dump_json(indent=2, exclude_none=True),
@@ -138,13 +140,14 @@ def _render_result(result: QualityResult, specs, agent, hide: bool, extremes: bo
                 st.error(f"Could not get an explanation: {e}")
     if st.session_state.get("quality_explanation"):
         st.markdown("**Explanation**")
-        st.markdown(st.session_state.quality_explanation)
+        # Plain text on purpose: the reply is model output, and Markdown would render its links and images.
+        st.text(st.session_state.quality_explanation)
 
 
 def render():
     ss = st.session_state
     st.markdown("**🟢 Active Engine:** Data Quality (DuckDB, single table)")
-    st.markdown("Upload one table, or give a file path on the server if you are running the app locally.")
+    st.markdown("Upload one table" + (", or give a file path on the server." if local_paths_allowed() else "."))
 
     uk = ss.uploader_key
     upload = st.file_uploader("Upload File", type=["csv", "xlsx", "xls"], key=f"qup_{uk}")
@@ -176,6 +179,8 @@ def render():
     hide, extremes = _ai_options()
     if agent is not None:
         st.caption(PRIVACY_NOTE)
+        if not hide:
+            st.warning(HEADER_WARNING)
         if st.button("✨ Suggest checks", key="quality_suggest"):
             _suggest_checks(agent, profile, edited, hide, extremes)
     for note in ss.get("quality_notes", []):

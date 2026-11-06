@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from core.quality.engine import QualityEngine
 from core.quality.profile import TableProfile
 from core.quality.specs import Distinct, NullRate, Outliers, QualityResult
 from ui.quality_grid import REF_MESSAGE, empty_frame, frame_to_specs, specs_to_frame
@@ -215,7 +216,7 @@ def test_explain_gets_the_result_object_and_the_flags(monkeypatch):
     kind, result, extremes, hide = FakeAgent.calls[-1]
     assert kind == "explain" and isinstance(result, QualityResult)
     assert (extremes, hide) == (True, False)
-    assert any("Everything looks fine." in m.value for m in at.markdown)
+    assert any("Everything looks fine." in t.value for t in at.text)
 
 
 # ---- local file paths (review #1) and no-AI-key isolation (review #5) ------------------------------
@@ -259,13 +260,112 @@ def test_tests_run_without_ai_keys_even_if_the_shell_has_one(monkeypatch):
     assert not [b for b in at.button if b.key in ("quality_suggest", "quality_explain")]
 
 
+# ---- header warning (#2), CSV formulas (#8), plain-text explanation (#9) ---------------------------
+
+def test_header_warning_is_shown_with_the_ai_buttons_until_names_are_hidden(monkeypatch):
+    from ui.pages.quality import HEADER_WARNING
+    at = _load(_app(FakeAgent(), monkeypatch))
+    assert any("first row is used as the column names" in w.value and "Hide column names" in w.value
+               for w in at.warning)
+    at.checkbox(key="quality_hide_names").check().run()
+    assert not any(w.value == HEADER_WARNING for w in at.warning)
+
+
+def test_csv_cells_that_look_like_formulas_are_neutralised():
+    from core.quality.report import csv_safe, results_csv
+    tab, cr = chr(9), chr(13)
+    for text in ["=HYPERLINK(1)", "+1", "-2+3", "@SUM(A1)", tab + "x", cr + "x"]:
+        assert csv_safe(text) == "'" + text
+    for text in ["plain", "a=b", "", "'=quoted"]:
+        assert csv_safe(text) == text
+    assert csv_safe(-1.5) == -1.5                      # numbers are not text cells
+    result = QualityEngine([NullRate(column="=cmd", max_pct=0)]).run(_csv_with_header("=cmd,ok"))
+    out = results_csv(result)
+    assert "'=cmd" in out and ",=cmd" not in out and '"=cmd' not in out
+
+
+def _csv_with_header(header):
+    import tempfile
+    path = Path(tempfile.mkdtemp()) / "f.csv"
+    path.write_text(header + chr(10) + "1,2" + chr(10))
+    return str(path)
+
+
+def test_explanation_is_rendered_as_plain_text(monkeypatch):
+    nasty = "![x](http://evil.example/p.png) **bold** [link](http://evil.example)"
+
+    class Nasty(FakeAgent):
+        def explain_results(self, result, include_extremes=False, hide_column_names=False):
+            return nasty
+
+    at = _load(_app(Nasty(), monkeypatch), [NullRate(column=FIRST, max_pct=100)])
+    at.button(key="quality_run").click().run()
+    at.button(key="quality_explain").click().run()
+    assert any(t.value == nasty for t in at.text)
+    assert not any(nasty in m.value for m in at.markdown)
+
+
 # ---- privacy guard -----------------------------------------------------------------------------
+
+FORBIDDEN_MODULES = {"litellm", "openai", "anthropic", "requests", "httpx"}
+FORBIDDEN_ATTRS = {"_call_llm", "completion", "suggest_configuration", "interpret_rule", "__getattribute__"}
+INTROSPECTION = {"getattr", "setattr", "delattr", "eval", "exec", "__import__"}
+
+
+def llm_violations(source: str) -> list:
+    """Everything in a UI module that could reach an LLM other than through the summary-only entry points."""
+    found = []
+    for n in ast.walk(ast.parse(source)):
+        if isinstance(n, ast.Import):
+            found += [f"imports {a.name}" for a in n.names if a.name.split(".")[0] in FORBIDDEN_MODULES]
+        elif isinstance(n, ast.ImportFrom) and n.module and n.module.split(".")[0] in FORBIDDEN_MODULES:
+            found.append(f"imports {n.module}")
+        elif isinstance(n, ast.Attribute) and n.attr in FORBIDDEN_ATTRS:
+            found.append(f"uses .{n.attr}")
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value in FORBIDDEN_ATTRS:
+            found.append(f"names {n.value!r} as a string")            # getattr(agent, "_call_llm"), dict lookups
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in FORBIDDEN_ATTRS:
+            found.append(f"calls {n.func.id}()")
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in INTROSPECTION:
+            found.append(f"calls {n.func.id}()")                      # dynamic access cannot be checked
+    return found
+
 
 @pytest.mark.parametrize("name", ["pages/quality.py", "quality_grid.py"])
 def test_ui_can_reach_an_llm_only_through_the_summary_builders(name):
-    tree = ast.parse((ROOT / "ui" / name).read_text(encoding="utf-8"))
-    imported = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | \
-               {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
-    assert not any(m and m.split(".")[0] in ("litellm", "openai", "anthropic", "requests", "httpx") for m in imported)
-    attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-    assert not attrs & {"_call_llm", "completion", "suggest_configuration", "interpret_rule"}
+    assert llm_violations((ROOT / "ui" / name).read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("snippet", [
+    'agent._call_llm("x")',
+    'getattr(agent, "_call_llm")("x")',
+    'fn = getattr(agent, name)',
+    'agent.__getattribute__("_call_llm")',
+    'import litellm',
+    'from litellm import completion',
+    'import requests',
+    'completion(model="m", messages=[])',
+    'agent.suggest_configuration(a, b)',
+])
+def test_the_guard_catches_the_obvious_bypasses(snippet):
+    assert llm_violations(snippet), snippet
+
+
+def test_the_guard_allows_the_two_summary_entry_points():
+    assert llm_violations("agent.suggest_checks(profile)" + chr(10) + "agent.explain_results(result)") == []
+
+
+def test_completion_is_only_called_inside_ai():
+    """The single place that sends a prompt is ai/agent.py; nothing else in the project may call completion()."""
+    skip = {"venv", ".git", "tests", "ai", "__pycache__", "node_modules", ".pytest_cache"}
+    offenders = []
+    for path in ROOT.rglob("*.py"):
+        rel = path.relative_to(ROOT)
+        if set(rel.parts[:-1]) & skip:
+            continue
+        for n in ast.walk(ast.parse(path.read_text(encoding="utf-8", errors="replace"))):
+            if isinstance(n, ast.Call):
+                f = n.func
+                if (isinstance(f, ast.Name) and f.id == "completion") or                         (isinstance(f, ast.Attribute) and f.attr == "completion"):
+                    offenders.append(f"{rel}:{n.lineno}")
+    assert offenders == []
