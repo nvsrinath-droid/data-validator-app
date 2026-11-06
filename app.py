@@ -8,11 +8,12 @@ load_dotenv()
 
 from ui.auth_view import render_header, require_login  # noqa: E402
 from ui.landing import render_landing  # noqa: E402
-from ui.pages import heavy, pushdown, standard  # noqa: E402
+from ui.pages import heavy, pushdown, quality, standard  # noqa: E402
 from ui.state import clear_workflow, init_state, sync_auth_with_url  # noqa: E402
 from ui.styles import inject_premium_css  # noqa: E402
 
-PAGES = {"standard": standard.render, "heavy": heavy.render, "pushdown": pushdown.render}
+PAGES = {"standard": standard.render, "heavy": heavy.render, "pushdown": pushdown.render,
+         "quality": quality.render}
 
 inject_premium_css()
 init_state()

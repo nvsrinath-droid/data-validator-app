@@ -197,6 +197,7 @@ def inject_premium_css():
     .tier-standard { border-top: 4px solid #3b82f6; }
     .tier-heavy { border-top: 4px solid #10b981; }
     .tier-enterprise { border-top: 4px solid #8b5cf6; }
+    .tier-quality { border-top: 4px solid #f59e0b; }
     
     /* Streamlit Dialog Modal */
     div[role="dialog"] {
