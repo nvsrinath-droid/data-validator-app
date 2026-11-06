@@ -9,7 +9,7 @@ from core.quality.report import report_json, results_frame
 from core.quality.specs import QualityConfig, QualityResult
 
 from ..components import model_picker
-from ..inputs import resolve_input
+from ..inputs import path_input, resolve_input
 from ..quality_grid import CHECK_TYPES, empty_frame, frame_to_specs, specs_to_frame
 
 PRIVACY_NOTE = "Only column statistics are sent, no rows."
@@ -138,7 +138,7 @@ def render():
 
     uk = ss.uploader_key
     upload = st.file_uploader("Upload File", type=["csv", "xlsx", "xls"], key=f"qup_{uk}")
-    local_path = st.text_input("OR: Local File Path (if running locally)", key=f"qfile_{uk}")
+    local_path = path_input("OR: Local File Path (if running locally)", f"qfile_{uk}")
     if not (upload or local_path):
         return
     path = resolve_input(upload, local_path, "quality")

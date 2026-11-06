@@ -155,6 +155,47 @@ def test_explain_gets_the_result_object_and_the_flags(monkeypatch):
     assert any("Everything looks fine." in m.value for m in at.markdown)
 
 
+# ---- local file paths (review #1) and no-AI-key isolation (review #5) ------------------------------
+
+@pytest.mark.parametrize("engine, key", [("quality", "qfile_0"), ("heavy", "hfile1_0")])
+def test_path_boxes_are_hidden_unless_enabled(monkeypatch, engine, key):
+    from streamlit.testing.v1 import AppTest
+    monkeypatch.delenv("TRUEALIGN_ALLOW_LOCAL_PATHS")
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+    at.session_state["is_guest"] = True
+    at.query_params["auth"] = "guest"
+    at.query_params["engine"] = engine
+    at.run()
+    assert not at.exception, at.exception
+    assert key not in [t.key for t in at.text_input]
+    assert any("TRUEALIGN_ALLOW_LOCAL_PATHS=1" in c.value for c in at.caption)
+
+
+def test_path_is_ignored_when_not_enabled(monkeypatch):
+    from ui.inputs import resolve_input
+    monkeypatch.delenv("TRUEALIGN_ALLOW_LOCAL_PATHS")
+    assert resolve_input(None, INVENTORY, "t") is None
+
+
+def test_enabled_paths_must_be_csv_or_excel(tmp_path):
+    secret = tmp_path / "server.env"
+    secret.write_text("OPENAI_API_KEY=sk-secret")
+    at = _app()
+    at.text_input(key="qfile_0").set_value(str(secret)).run()
+    assert not at.exception, at.exception
+    assert any("Only .csv, .xlsx, .xls" in e.value for e in at.error)
+    assert "quality_profile" not in at.session_state
+    # a missing file with a good extension still gets the ordinary message, and exposes nothing about the bad one
+    at.text_input(key="qfile_0").set_value(str(tmp_path / "missing.csv")).run()
+    assert any("not found" in e.value for e in at.error)
+
+
+def test_tests_run_without_ai_keys_even_if_the_shell_has_one(monkeypatch):
+    # the autouse fixture blanks every provider key, so this must hold regardless of the developer's shell
+    at = _load(_app())
+    assert not [b for b in at.button if b.key in ("quality_suggest", "quality_explain")]
+
+
 # ---- privacy guard -----------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", ["pages/quality.py", "quality_grid.py"])

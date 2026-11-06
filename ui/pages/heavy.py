@@ -3,7 +3,7 @@ import streamlit as st
 from core.sources import FilePair
 
 from ..components import render_mapping_workflow
-from ..inputs import resolve_input
+from ..inputs import path_input, resolve_input
 
 
 def render():
@@ -15,11 +15,11 @@ def render():
     with col1:
         st.subheader("📁 Source Data (System of Record)")
         upload_1 = st.file_uploader("Upload Source File", type=["csv", "xlsx", "xls"], key=f"hup1_{uk}")
-        path_1 = st.text_input("OR: Local File Path 1 (if running locally)", key=f"hfile1_{uk}")
+        path_1 = path_input("OR: Local File Path 1 (if running locally)", f"hfile1_{uk}")
     with col2:
         st.subheader("📄 Target Data (To Compare)")
         upload_2 = st.file_uploader("Upload Target File", type=["csv", "xlsx", "xls"], key=f"hup2_{uk}")
-        path_2 = st.text_input("OR: Local File Path 2 (if running locally)", key=f"hfile2_{uk}")
+        path_2 = path_input("OR: Local File Path 2 (if running locally)", f"hfile2_{uk}")
 
     if not ((upload_1 or path_1) and (upload_2 or path_2)):
         return
