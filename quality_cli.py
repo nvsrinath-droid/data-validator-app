@@ -9,7 +9,6 @@ Exits 0 when no check failed (warn and inconclusive results are reported but do 
 or errored (or, with --strict, was inconclusive), 2 on usage errors.
 Baselines hold column statistics: keep them outside the repository.
 """
-import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +20,7 @@ from ai.agent import AIAgent
 from core.quality.baseline import load_baseline, save_baseline
 from core.quality.engine import QualityEngine
 from core.quality.profile import profile_file
+from core.quality.report import report_json
 from core.quality.specs import QualityConfig, QualityResult
 
 SAMPLE_ROWS_SHOWN = 5
@@ -61,14 +61,7 @@ def print_result(result: QualityResult) -> None:
 def write_report(result: QualityResult, directory: str) -> str:
     Path(directory).mkdir(parents=True, exist_ok=True)
     path = os.path.join(directory, "quality_report.json")
-    payload = {
-        "row_count": result.row_count, "warnings": result.warnings,
-        "results": [{"check": r.check.model_dump(mode="json"), "status": r.status, "metric": r.metric,
-                     "violations": r.violations, "message": r.message,
-                     "sample": json.loads(r.sample.to_json(orient="records", date_format="iso"))}
-                    for r in result.results],
-    }
-    Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    Path(path).write_text(report_json(result), encoding="utf-8")
     return path
 
 
