@@ -101,6 +101,13 @@ The key design point: **one plan, three renderers.** `build_plan()` works out on
 | **Massive files** | DuckDB (`core/engines/duckdb_engine.py`) | Very large (GB-scale) CSV/Excel extracts | DuckDB reads the files from disk with a columnar engine; pandas never holds the full data |
 | **Enterprise** | SQL pushdown (`core/engines/sql_pushdown.py`) | Both datasets already live in the same warehouse | Inside the database |
 
+### Data Quality tier (single table)
+
+The fourth landing card (`?engine=quality`) health-checks one CSV or Excel file instead of comparing two. The flow is: upload a file (or give a server path when running locally), read the column profile (kind, null %, distinct values, values that do not parse as the inferred kind), edit the checks grid, run, then read the pass / warn / fail / inconclusive results with a capped sample of violating rows. Downloads: the JSON report, a results CSV and the checks as JSON (reusable with `python main.py FILE --quality`).
+
+- **AI is optional and summary-only.** *Suggest checks* and *Explain results* use your session's API key and send only column statistics (names, kinds, null %, distinct counts) or check parameters and counts. No rows, offending values or messages are sent. *Hide column names* (replaces every name with `col_1`, `col_2`, ...) and *Include extremes* (adds min/max and the freshness age) are both off by default. Suggested checks are loaded into the grid for you to review; they never run automatically.
+- **Not in the UI yet:** `ref_integrity` checks (they need a reference file) and baselines (type drift against a saved profile). Use the command line for both.
+
 **Why push down?** Downloading two 50M-row tables to compare them costs you three times over:
 
 - network transfer
@@ -182,7 +189,7 @@ The app opens at http://localhost:8501. Copying `.env.example` is optional; it h
 
 - **No API key needed to try it.** Choose *Manual Mapping*, which pairs columns by name, or load a template. To use AI mapping, add a model and key under ⚙️ Settings. Keys stay in your session and are passed on each LiteLLM call; they are never written to the server environment.
 - **Database drivers:** Snowflake, Oracle (thin mode, no Instant Client needed) and PostgreSQL work from `requirements.txt` alone. SQL Server also needs Microsoft *ODBC Driver 18 for SQL Server* (or 17) installed on the host. The connection form lets you pick the driver; it defaults to 18 when installed, otherwise 17. Driver 18 encrypts connections by default, so for an on-prem server with a self-signed certificate, tick *Trust server certificate*.
-- **Demo data** is in `samples/`. Try the *Massive Data Files* tier with `samples/inventory_system.csv` against `samples/vendor_catalog.csv`, or the *Enterprise* tier with SQLite `samples/local_production.db` (table `employees`).
+- **Demo data** is in `samples/`. Try the *Massive Data Files* tier with `samples/inventory_system.csv` against `samples/vendor_catalog.csv`, or the *Enterprise* tier with SQLite `samples/local_production.db` (table `employees`). Try the *Data Quality* tier with `samples/inventory_system.csv` on its own.
 
 ### Command line
 
@@ -242,6 +249,7 @@ The other test files cover the rest:
 
 - `tests/test_security.py`: API keys passed per call, no `exec`/`eval`, rejection of malicious LLM output, passwords with special characters, `.gitignore`.
 - `tests/test_architecture.py`: pushdown returns only exceptions and caps them, the CLI, templates, and headless [AppTest](https://docs.streamlit.io/develop/api-reference/app-testing) runs of all three tiers end to end.
+- `tests/test_quality_ui.py`: the quality checks grid, AppTest runs of the Data Quality tier with a stubbed AI agent, and guards that the page can only reach an LLM through the summary-only builders.
 - `tests/test_oracle_kit.py`: the Oracle test kit below, run through all three engines.
 
 #### Testing against a real Oracle database
