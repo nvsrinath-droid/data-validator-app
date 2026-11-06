@@ -103,9 +103,9 @@ The key design point: **one plan, three renderers.** `build_plan()` works out on
 
 ### Data Quality tier (single table)
 
-The fourth landing card (`?engine=quality`) health-checks one CSV or Excel file instead of comparing two. The flow is: upload a file (or give a server path when running locally), read the column profile (kind, null %, distinct values, values that do not parse as the inferred kind), edit the checks grid, run, then read the pass / warn / fail / inconclusive results with a capped sample of violating rows. Downloads: the JSON report, a results CSV and the checks as JSON (reusable with `python main.py FILE --quality`).
+The fourth landing card (`?engine=quality`) health-checks one CSV or Excel file instead of comparing two. The flow is: upload a file (or, with `TRUEALIGN_ALLOW_LOCAL_PATHS=1`, give a path on the machine running the app), read the column profile (kind, null %, distinct values, values that do not parse as the inferred kind), edit the checks grid, run, then read the pass / warn / fail / inconclusive results with a capped sample of violating rows. Downloads: the JSON report, a results CSV and the checks as JSON (reusable with `python main.py FILE --quality`).
 
-- **AI is optional and summary-only.** *Suggest checks* and *Explain results* use your session's API key and send only column statistics (names, kinds, null %, distinct counts) or check parameters and counts. No rows, offending values or messages are sent. *Hide column names* (replaces every name with `col_1`, `col_2`, ...) and *Include extremes* (adds min/max and the freshness age) are both off by default. Suggested checks are loaded into the grid for you to review; they never run automatically.
+- **AI is optional and summary-only.** *Suggest checks* and *Explain results* use your session's API key and send only column statistics (names, kinds, null %, distinct counts) or check parameters and counts. No rows, offending values or messages are sent. *Hide column names* (replaces every name with `col_1`, `col_2`, ...) and *Include extremes* (adds min/max and the freshness age) are both off by default. Suggested checks are added to the grid for you to review; they never run automatically. A file without a header row uses its first row as column names, and the page warns that those names are sent to the AI unless *Hide column names* is ticked. The explanation is shown as plain text, and text cells in the results CSV that start with `=`, `+`, `-` or `@` are prefixed with a single quote so spreadsheets do not run them as formulas.
 - **Not in the UI yet:** `ref_integrity` checks (they need a reference file) and baselines (type drift against a saved profile). Use the command line for both.
 
 **Why push down?** Downloading two 50M-row tables to compare them costs you three times over:
@@ -189,6 +189,7 @@ The app opens at http://localhost:8501. Copying `.env.example` is optional; it h
 
 - **No API key needed to try it.** Choose *Manual Mapping*, which pairs columns by name, or load a template. To use AI mapping, add a model and key under ⚙️ Settings. Keys stay in your session and are passed on each LiteLLM call; they are never written to the server environment.
 - **Database drivers:** Snowflake, Oracle (thin mode, no Instant Client needed) and PostgreSQL work from `requirements.txt` alone. SQL Server also needs Microsoft *ODBC Driver 18 for SQL Server* (or 17) installed on the host. The connection form lets you pick the driver; it defaults to 18 when installed, otherwise 17. Driver 18 encrypts connections by default, so for an on-prem server with a self-signed certificate, tick *Trust server certificate*.
+- **Reading files by path is off by default.** The *Local File Path* boxes (Massive and Data Quality tiers) let a user open any file on the machine running the app, which is fine on your laptop and unsafe on a shared server. They only appear when `TRUEALIGN_ALLOW_LOCAL_PATHS=1` is set (in the shell, or in `.env`); uploads always work. Even when enabled, a path must end in `.csv`, `.xlsx` or `.xls`.
 - **Demo data** is in `samples/`. Try the *Massive Data Files* tier with `samples/inventory_system.csv` against `samples/vendor_catalog.csv`, or the *Enterprise* tier with SQLite `samples/local_production.db` (table `employees`). Try the *Data Quality* tier with `samples/inventory_system.csv` on its own.
 
 ### Command line
@@ -344,9 +345,12 @@ tests/                 pytest suite
 
 ## Roadmap
 
-- **Single-table data quality checks.** Freshness, null rates, column
-  profiling and referential integrity, alongside the two-table
-  reconciliation.
+- ~~**Single-table data quality checks.**~~ **Done.** Freshness, null
+  rates, column profiling, type drift, outliers and referential
+  integrity, alongside the two-table reconciliation: `--quality` on the
+  command line and the *Data Quality* tier in the app. Still
+  command-line only: `ref_integrity` checks (they need a reference file)
+  and baselines.
 - **Snowflake Cortex integration.** Run AI column mapping and
   root-cause analysis inside Snowflake with Cortex, so the data never
   leaves its governance boundary for LLM processing. This extends the
