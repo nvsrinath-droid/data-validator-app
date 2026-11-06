@@ -12,7 +12,7 @@ def render_landing():
     st.markdown("<h2 style='text-align: center; margin-bottom: 0.5rem;'>✨ Unleash AI on Your Data Validation</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 2.5rem;'>Choose the processing tier that deeply matches your data volume and source.</p>", unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.markdown("""
         <div class="tier-card tier-standard">
@@ -57,6 +57,21 @@ def render_landing():
         """, unsafe_allow_html=True)
         if st.button("Launch Enterprise Engine", type="primary", width="stretch"):
             open_tier("pushdown")
+
+    with c4:
+        st.markdown("""
+        <div class="tier-card tier-quality">
+            <h3>🩺 Data Quality</h3>
+            <p>Health-check a single table.</p>
+            <ul>
+                <li>Column profile: nulls, types, distinct counts</li>
+                <li>Editable checks, optionally AI-suggested</li>
+                <li>Only statistics ever reach the AI, never rows</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Launch Data Quality", type="primary", width="stretch"):
+            open_tier("quality")
 
     st.markdown("---")
     st.subheader("We'd Love to Hear From You")

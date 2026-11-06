@@ -10,6 +10,7 @@ from core.sources import DataPair
 from core.templates import (PREVIEW_COL, RULE_COL, SOURCE_COL, TARGET_COL, config_from_grid, config_to_grid,
                             manual_config, preview_is_stale, read_template, template_bytes, with_rule_preview)
 
+from .inputs import path_input
 from .results import render_results
 from .state import AVAILABLE_MODELS, reset_app, set_config
 
@@ -18,7 +19,7 @@ def render_connection_fields(key_prefix: str, label: str = "Database Type"):
     """Database connection inputs. Returns a SQLAlchemy URL (password masked when printed) or None."""
     db_type = st.selectbox(label, DB_TYPES, key=f"db_type_{key_prefix}")
     if db_type == "SQLite (Local)":
-        db_path = st.text_input("Database File Path", placeholder="samples/local_production.db", key=f"sqlite_{key_prefix}")
+        db_path = path_input("Database File Path", f"sqlite_{key_prefix}", placeholder="samples/local_production.db")
         return build_url(db_type, sqlite_path=db_path) if db_path else None
 
     c1, c2 = st.columns([3, 1])

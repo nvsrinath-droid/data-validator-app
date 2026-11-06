@@ -39,6 +39,15 @@ The Streamlit UI picks an engine by "tier":
 | `heavy` | `core/engines/duckdb_engine.py` `DuckDBEngine` | DuckDB reads large CSV/Excel files from disk |
 | `pushdown` | `core/engines/sql_pushdown.py` `SQLPushdownEngine` | the remote database itself (FULL OUTER JOIN of two queries) |
 
+A fourth tier, `quality` (`?engine=quality`, `ui/pages/quality.py`), is not a comparison engine: it profiles and
+checks one table with `core/quality/` (DuckDB; checks are closed-set specs in `core/quality/specs.py`). Its UI flow is
+upload -> profile -> editable checks grid (`ui/quality_grid.py`, pure functions) -> run -> results/downloads. The UI
+omits `ref_integrity` (grid rows are rejected with a pointer to the CLI) and baselines. The AI buttons may only call
+`AIAgent.suggest_checks` / `explain_results`, which build prompts from `ai/quality_summary.py` (summaries, never
+rows); suggestions load into the grid and never run automatically. `tests/test_quality_ui.py` enforces this.
+Server-side file paths (the "Local File Path" boxes and the SQLite "Database File Path" box) are hidden unless `TRUEALIGN_ALLOW_LOCAL_PATHS=1`, and must be
+.csv/.xlsx/.xls; `ui/inputs.py` enforces both, so new file inputs should use `path_input`/`resolve_input`.
+
 The core invariant: **all three engines must produce the same answer for the same data and config**
 (NULL handling, numeric/string/date normalization, tolerance rules, duplicate keys, missing rows).
 `tests/test_correctness.py` runs every scenario through all three engines (`run_all`); add new semantics there.
@@ -58,7 +67,7 @@ Other pieces:
 - `core/sources.py`: one adapter per tier (`ConnectorPair`, `FilePair`, `PushdownPair`) with
   columns/sample/run; used by both the UI and `main.py`.
 - `ui/`: `app.py` only routes. `ui/components.py` holds the shared connection form and the
-  map -> run -> results workflow; `ui/pages/*.py` only collect each tier's inputs.
+  map -> run -> results workflow; `ui/pages/*.py` only collect each tier's inputs (`ui/inputs.py` resolves uploads/paths for the file tiers).
 - `ai/agent.py` `AIAgent` wraps LiteLLM. API keys are per user (Streamlit session state) and are passed
   to each `completion()` call; never write them to `os.environ`.
 - `core/db.py` builds connection URLs with `URL.create()` (special-character passwords, masked in errors).

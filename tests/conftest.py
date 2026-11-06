@@ -15,6 +15,17 @@ from core.schemas import ColumnMap, ValidationConfig  # noqa: E402
 ENGINES = ["pandas", "duckdb", "pushdown"]
 
 
+@pytest.fixture(autouse=True)
+def _isolated_environment(monkeypatch):
+    """Every test starts with no AI keys (not from the shell and not from a .env, which load_dotenv() never
+    overrides) and with local file paths enabled, because many tests feed the app sample files by path.
+    Tests of the default (paths off) delete the variable themselves."""
+    from ui.state import PROVIDER_KEYS
+    for key in PROVIDER_KEYS:
+        monkeypatch.setenv(key, "")
+    monkeypatch.setenv("TRUEALIGN_ALLOW_LOCAL_PATHS", "1")
+
+
 def config(keys, *mappings, **kwargs) -> ValidationConfig:
     """config(["ID"], ("Amt", "Amount", "within 0.01"), ("Name", "Name"))"""
     maps = [ColumnMap(file1_column=m[0], file2_column=m[1], validation_rule=m[2] if len(m) > 2 else None)
