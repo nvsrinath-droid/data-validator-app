@@ -134,6 +134,7 @@ Numeric, date and string casts also differ per database (for example `TRY_CAST` 
   - Everything else compares as text, trimmed by default (JD Edwards CHAR padding), with blanks treated as NULL (as Oracle does).
 
   Both string options can be switched off, and a column's type can be forced.
+  The rules above apply once the data is loaded; how the *text* `N/A` is loaded differs by engine (see Known limitations).
 - **Keys are normalized the same way**, so a padded `'AB   '` joins to `'AB'`.
 - **Duplicate primary keys** are found before the join, reported on their own tab, and left out of matching instead of multiplying into false mismatches.
 - **Missing rows** are detected from which side of the join a row came from, so it works whether or not the key is also a mapped column.
@@ -194,6 +195,26 @@ python main.py source.csv target.csv --model anthropic/claude-opus-5 --auto   # 
 ```
 
 Reports (JSON, Excel, CSV) are written to `output/`. The exit code is `0` when everything reconciles, `1` when exceptions are found and `2` on errors.
+
+#### Data quality checks (one table)
+
+```bash
+python main.py data.csv --profile                                   # column profile
+python main.py data.csv --quality checks.json --ref customers=customers.csv
+python main.py data.csv --quality checks.json --strict              # inconclusive results fail the run too
+```
+
+The exit code is a gate for pipelines:
+
+| Exit code | Meaning |
+|---|---|
+| `0` | No check failed. `warn` results (checks with `"severity": "warn"`) and `inconclusive` results are printed, and counted in the summary line, but do not fail the run. |
+| `1` | At least one check failed, or could not run (`error`, for example an unknown column). With `--strict`, an `inconclusive` result also gives `1`. |
+| `2` | Usage or configuration error: an unreadable file, an invalid checks file, a bad `--ref` or `--as-of`, or `--save-baseline` pointing at an existing file without `--overwrite-baseline`. |
+
+An `inconclusive` result means the check cannot give a meaningful answer for that data. Today that is the IQR outlier method on a column where about half or more of the values are equal (the quartiles coincide, so every other value would be flagged); the message says so and suggests the `zscore` method. Because it is not a failure, a real outlier in such a column is not reported by default. Use `--strict`, or switch that check to `zscore`, when the pipeline must not miss it.
+
+Freshness is computed in UTC: timestamps with an offset (`2026-11-04T10:00:00+05:00`, `...Z`, `...+0530`) are converted to UTC, text without an offset is taken as UTC, and `--as-of` defaults to the current UTC time.
 
 ### Tests
 
@@ -310,6 +331,7 @@ tests/                 pytest suite
 
 - SQL pushdown has been validated end to end against Oracle Database Free (September 2026) with a JD Edwards-style test set covering CHAR padding, NULL handling, numeric type drift, DATE vs TIMESTAMP, percentage tolerance on negative amounts, duplicate keys and missing rows. Snowflake, SQL Server and PostgreSQL follow each database's documented syntax but are only tested against SQLite in the automated suite. Validate against your own warehouse before relying on it for sign-off.
 - Date detection covers ISO-8601 values. Other formats (for example `01/15/2024`, or JDE Julian dates) are compared as text unless converted in the source query.
+- **The text `N/A` is not treated the same by every engine.** The semantics above are identical once values are loaded, but the engines load files differently. The standard tier reads files with pandas, which turns the *text* `N/A`, `NA`, `null` and `NaN` into NULL. The DuckDB tier keeps those words as text when reading CSV but turns them into NULL when reading Excel. SQL pushdown sees whatever the database stores. So a source `N/A` against a target NULL matches on the standard tier, mismatches on the DuckDB tier with CSV, and matches on the DuckDB tier with Excel. If your data uses such placeholders, convert them to real NULLs (or to one agreed value) before comparing. Single-table data quality checks load every file as raw text, in CSV and Excel alike, so a literal `N/A` is counted as a value there (and reported by type-drift checks), not as a NULL.
 - Excel inputs on the DuckDB tier are read through pandas. Excel caps out at about 1M rows, so for anything larger export to CSV.
 
 ## Roadmap

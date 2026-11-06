@@ -152,6 +152,20 @@ def clean_query(query: str) -> str:
     return query.strip().rstrip(";").strip()
 
 
+def normalize_expr(d: Dialect, raw: str, kind: Kind, trim: bool = True, blank_as_null: bool = True) -> str:
+    """SQL for the per-kind normalization (the SQL twin of core.normalize.normalize_series)."""
+    if kind == Kind.NUMERIC:
+        return d.to_num(raw)
+    if kind == Kind.DATE:
+        return d.to_ts(raw)
+    expr = d.to_str(raw)
+    if trim:
+        expr = f"TRIM({expr})"
+    if blank_as_null:
+        expr = f"NULLIF({expr}, '')"
+    return expr
+
+
 @dataclass
 class SQLComparison:
     """Builds and runs the comparison for one plan against two relations (table names or subqueries)."""
@@ -162,17 +176,7 @@ class SQLComparison:
 
     # ---- expression helpers -------------------------------------------------
     def _norm(self, raw: str, kind: Kind) -> str:
-        d = self.dialect
-        if kind == Kind.NUMERIC:
-            return d.to_num(raw)
-        if kind == Kind.DATE:
-            return d.to_ts(raw)
-        expr = d.to_str(raw)
-        if self.plan.trim:
-            expr = f"TRIM({expr})"
-        if self.plan.blank_as_null:
-            expr = f"NULLIF({expr}, '')"
-        return expr
+        return normalize_expr(self.dialect, raw, kind, self.plan.trim, self.plan.blank_as_null)
 
     def _match(self, a: str, b: str, col: ColumnPlan) -> str:
         d, spec = self.dialect, col.rule
