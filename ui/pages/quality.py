@@ -12,7 +12,7 @@ from core.quality.specs import QualityConfig, QualityResult
 
 from ..components import model_picker
 from ..inputs import local_paths_allowed, path_input, resolve_input
-from ..quality_grid import CHECK_TYPES, empty_frame, frame_to_specs, non_blank_rows, specs_to_frame
+from ..quality_grid import CHECK_TYPES, empty_frame, frame_to_specs, new_checks, non_blank_rows, specs_to_frame
 
 PRIVACY_NOTE = "Only column statistics are sent, no rows."
 HEADER_WARNING = ("If your file has no header row, its first row is used as the column names, and column names are "
@@ -91,10 +91,16 @@ def _suggest_checks(agent: AIAgent, profile, current_rows: pd.DataFrame, hide: b
     except Exception as e:
         st.error(f"Failed to get suggestions: {e}")
         return
+    existing, _ = frame_to_specs(current_rows, [c.name for c in profile.columns])
+    suggested, skipped = new_checks(existing, suggested)
+    summary = [f"Added {len(suggested)} suggested check(s) to the grid. Review them, then run."] if suggested         else ["The model suggested no new checks."]
+    if skipped:
+        summary.append(f"Skipped {skipped} suggestion(s) that were already in the grid.")
+    ss.quality_notes = summary + list(notes)
+    if not suggested:
+        st.rerun()                                     # nothing to add: keep the grid and the current results
     # Append to the grid exactly as the user has it, so a row with an error is kept for them to fix.
     ss.quality_checks = pd.concat([non_blank_rows(current_rows), specs_to_frame(suggested)], ignore_index=True)
-    ss.quality_notes = ([f"Added {len(suggested)} suggested check(s) to the grid. Review them, then run."]
-                        + list(notes))
     ss.pop("quality_result", None)
     ss.pop("quality_explanation", None)
     ss.config_version += 1  # a new widget key makes the grid pick up the new rows

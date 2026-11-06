@@ -62,6 +62,20 @@ def non_blank_rows(frame: pd.DataFrame) -> pd.DataFrame:
     return frame[keep].reset_index(drop=True)
 
 
+def new_checks(existing: list, suggested: list) -> Tuple[list, int]:
+    """(suggestions not already present, how many were skipped). A suggestion is a duplicate when it equals a
+    grid row once defaults are filled in (so a blank severity matches "fail"), or an earlier suggestion. The same
+    type and column with different parameters is a different check and is kept."""
+    seen = {c.model_dump_json() for c in existing}
+    kept = []
+    for c in suggested:
+        key = c.model_dump_json()
+        if key not in seen:
+            seen.add(key)
+            kept.append(c)
+    return kept, len(suggested) - len(kept)
+
+
 def frame_to_specs(frame: pd.DataFrame, columns: List[str]) -> Tuple[list, List[str]]:
     """Grid -> (valid specs, one error message per bad row). A bad row never stops the others from being read."""
     specs, errors = [], []

@@ -67,6 +67,22 @@ def test_grid_rejects_contradictory_and_extreme_values_and_never_raises():
     assert all(len(e) < 200 for e in errors)
 
 
+def test_new_checks_skips_duplicates_of_grid_rows_and_of_each_other():
+    from ui.quality_grid import new_checks
+    grid = [NullRate(column="a", max_pct=1), Distinct(column="b", unique=True)]
+    suggested = [NullRate(column="a", max_pct=1, severity="fail"),     # same as the grid row (default severity)
+                 NullRate(column="a", max_pct=5),                      # same type+column, other parameter: kept
+                 NullRate(column="a", max_pct=1, severity="warn"),     # other severity: kept
+                 Outliers(column="c"), Outliers(column="c"),           # repeated within the suggestions
+                 Distinct(column="b", unique=True)]
+    kept, skipped = new_checks(grid, suggested)
+    assert [c.model_dump(exclude_none=True) for c in kept] == [
+        {"column": "a", "severity": "fail", "type": "null_rate", "max_pct": 5.0},
+        {"column": "a", "severity": "warn", "type": "null_rate", "max_pct": 1.0},
+        Outliers(column="c").model_dump(exclude_none=True)]
+    assert skipped == 3
+
+
 def test_non_blank_rows_keeps_error_rows_and_drops_blank_ones():
     from ui.quality_grid import non_blank_rows
     frame = pd.DataFrame([{"type": "ref_integrity", "column": "a"}, {"column": None}, {"unique": False}])
@@ -176,6 +192,22 @@ def test_suggest_keeps_rows_that_have_errors(monkeypatch):
     at.button(key="quality_suggest").click().run()
     grid = at.session_state["quality_checks"]
     assert list(grid["type"]) == ["ref_integrity", "null_rate"]     # the bad row survived, suggestion appended
+
+
+def test_suggest_skips_checks_already_in_the_grid(monkeypatch):
+    at = _load(_app(FakeAgent(), monkeypatch), [NullRate(column=FIRST, max_pct=1)])   # FakeAgent suggests this
+    at.button(key="quality_run").click().run()
+    at.button(key="quality_suggest").click().run()
+    assert not at.exception, at.exception
+    assert len(at.session_state["quality_checks"]) == 1                 # nothing was added
+    assert "quality_result" in at.session_state                          # and the results were kept
+    notes = [i.value for i in at.info]
+    assert "The model suggested no new checks." in notes and any("Skipped 1 suggestion" in n for n in notes)
+    # with an empty grid the same suggestion is added
+    at2 = _load(_app(FakeAgent(), monkeypatch))
+    at2.button(key="quality_suggest").click().run()
+    assert len(at2.session_state["quality_checks"]) == 1
+    assert not any("Skipped" in i.value for i in at2.info)
 
 
 def test_changing_the_file_clears_notes_and_explanation(monkeypatch, tmp_path):
