@@ -45,7 +45,7 @@ upload -> profile -> editable checks grid (`ui/quality_grid.py`, pure functions)
 omits `ref_integrity` (grid rows are rejected with a pointer to the CLI) and baselines. The AI buttons may only call
 `AIAgent.suggest_checks` / `explain_results`, which build prompts from `ai/quality_summary.py` (summaries, never
 rows); suggestions load into the grid and never run automatically. `tests/test_quality_ui.py` enforces this.
-Server-side file paths (the "Local File Path" boxes) are hidden unless `TRUEALIGN_ALLOW_LOCAL_PATHS=1`, and must be
+Server-side file paths (the "Local File Path" boxes and the SQLite "Database File Path" box) are hidden unless `TRUEALIGN_ALLOW_LOCAL_PATHS=1`, and must be
 .csv/.xlsx/.xls; `ui/inputs.py` enforces both, so new file inputs should use `path_input`/`resolve_input`.
 
 The core invariant: **all three engines must produce the same answer for the same data and config**

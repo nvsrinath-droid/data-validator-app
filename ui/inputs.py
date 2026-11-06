@@ -15,13 +15,14 @@ def local_paths_allowed() -> bool:
     return os.environ.get(LOCAL_PATHS_ENV) == "1"
 
 
-def path_input(label: str, key: str) -> str:
-    """The "OR: local file path" box, or "" (and a one-line hint) when local paths are not enabled."""
+def path_input(label: str, key: str, placeholder: str = "") -> str:
+    """A server-side path box (a file, or a SQLite database), or "" (and a one-line hint) when local paths are not
+    enabled."""
     if not local_paths_allowed():
         st.caption(f"Server file paths are disabled. To read files from this machine, start the app with "
                    f"{LOCAL_PATHS_ENV}=1.")
         return ""
-    return st.text_input(label, key=key)
+    return st.text_input(label, key=key, placeholder=placeholder)
 
 
 def resolve_input(upload, path: str, prefix: str) -> Optional[str]:

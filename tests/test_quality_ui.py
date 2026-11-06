@@ -235,6 +235,41 @@ def test_path_boxes_are_hidden_unless_enabled(monkeypatch, engine, key):
     assert any("TRUEALIGN_ALLOW_LOCAL_PATHS=1" in c.value for c in at.caption)
 
 
+@pytest.mark.parametrize("engine, key", [("pushdown", "sqlite_pd")])
+def test_sqlite_database_path_box_is_hidden_unless_enabled(monkeypatch, engine, key):
+    from streamlit.testing.v1 import AppTest
+
+    def open_sqlite():
+        at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+        at.session_state["is_guest"] = True
+        at.query_params["auth"] = "guest"
+        at.query_params["engine"] = engine
+        at.run()
+        at.selectbox(key="db_type_pd").select("SQLite (Local)").run()
+        assert not at.exception, at.exception
+        return at
+
+    assert key in [t.key for t in open_sqlite().text_input]          # enabled (the fixture's default)
+    monkeypatch.delenv("TRUEALIGN_ALLOW_LOCAL_PATHS")
+    at = open_sqlite()
+    assert key not in [t.key for t in at.text_input]
+    assert any("TRUEALIGN_ALLOW_LOCAL_PATHS=1" in c.value for c in at.caption)
+
+
+def test_sqlite_database_path_box_is_hidden_on_the_standard_tier_too(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    monkeypatch.delenv("TRUEALIGN_ALLOW_LOCAL_PATHS")
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+    at.session_state["is_guest"] = True
+    at.query_params["auth"] = "guest"
+    at.query_params["engine"] = "standard"
+    at.run()
+    at.radio(key="src1_type_0").set_value("SQL Database").run()
+    at.selectbox(key="db_type_src1_0").select("SQLite (Local)").run()
+    assert not at.exception, at.exception
+    assert "sqlite_src1_0" not in [t.key for t in at.text_input]
+
+
 def test_path_is_ignored_when_not_enabled(monkeypatch):
     from ui.inputs import resolve_input
     monkeypatch.delenv("TRUEALIGN_ALLOW_LOCAL_PATHS")
