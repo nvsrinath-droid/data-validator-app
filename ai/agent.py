@@ -1,4 +1,5 @@
 import json
+import warnings
 from typing import List, Optional, Tuple
 
 from litellm import completion, get_llm_provider
@@ -11,6 +12,16 @@ from core.quality.specs import CheckSpec, Freshness, Outliers, QualityResult, Re
 from core.rules import RuleSpec, parse_rule
 from core.schemas import ValidationConfig
 
+def silence_litellm_serializer_warning() -> None:
+    """LiteLLM dumps its own response objects with pydantic after every call, and pydantic reports "Pydantic
+    serializer warnings ... serialized value may not be as expected" for them. It is noise from inside LiteLLM
+    (we never serialise those objects), and it lands in the user's console once per call. Only that message is
+    ignored. A process-wide filter, not catch_warnings(), because catch_warnings is not thread-safe and Streamlit
+    runs one thread per session. Idempotent: warnings.filterwarnings replaces an identical filter."""
+    warnings.filterwarnings("ignore", message=r"Pydantic serializer warnings", category=UserWarning)
+
+
+silence_litellm_serializer_warning()
 MAX_SUGGESTED_CHECKS = 50
 _CHECK_ADAPTER = TypeAdapter(CheckSpec)
 
@@ -66,6 +77,7 @@ class AIAgent:
             kwargs["temperature"] = 0
         if is_json and provider in JSON_MODE_PROVIDERS:
             kwargs["response_format"] = {"type": "json_object"}
+        silence_litellm_serializer_warning()   # a test runner or library may have reset the filters since import
         try:
             response = completion(**kwargs)
             return response.choices[0].message.content
