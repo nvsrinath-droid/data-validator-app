@@ -139,6 +139,56 @@ def test_resolve_input_shows_a_message_instead_of_crashing_when_saving_fails(mon
     store._finalizer()
 
 
+# ---- deletes that failed are remembered and retried ----------------------------------------------
+
+@pytest.fixture
+def pending(monkeypatch):
+    fresh = set()
+    monkeypatch.setattr(inputs, "_pending", fresh)
+    return fresh
+
+
+def test_a_file_that_could_not_be_deleted_is_recorded_and_retried_by_the_next_sweep(store, tmp_path, monkeypatch, pending):
+    path = store.put("quality", FakeUpload())
+    real_remove = os.remove
+    monkeypatch.setattr(os, "remove", lambda p: (_ for _ in ()).throw(PermissionError("in use")))
+    store.release("quality")
+    assert pending == {path} and os.path.exists(path)
+    monkeypatch.setattr(os, "remove", real_remove)                  # the other program closed the file
+    sweep_stale_uploads(directory=str(tmp_path))
+    assert not os.path.exists(path) and pending == set()
+
+
+def test_pending_deletes_are_also_retried_on_the_next_put(store, monkeypatch, pending):
+    first = store.put("quality", FakeUpload(file_id="one"))
+    real_remove = os.remove
+    monkeypatch.setattr(os, "remove", lambda p: (_ for _ in ()).throw(PermissionError("in use")))
+    store.release("quality")
+    monkeypatch.setattr(os, "remove", real_remove)
+    store.put("quality", FakeUpload(file_id="two"))
+    assert not os.path.exists(first) and pending == set()
+
+
+def test_a_session_folder_that_could_not_be_removed_at_session_end_is_retried(tmp_path, monkeypatch, pending):
+    s = UploadStore(parent=str(tmp_path))
+    s.put("quality", FakeUpload())
+    folder = s.dir
+    real_rmtree = inputs.shutil.rmtree
+    monkeypatch.setattr(inputs.shutil, "rmtree", lambda p, *a, **k: (_ for _ in ()).throw(PermissionError("in use")))
+    del s
+    gc.collect()
+    assert os.path.isdir(folder) and pending == {folder}            # kept on record, not silently abandoned
+    monkeypatch.setattr(inputs.shutil, "rmtree", real_rmtree)
+    sweep_stale_uploads(directory=str(tmp_path))                    # even though the folder is far from a day old
+    assert not os.path.exists(folder) and pending == set()
+
+
+def test_a_pending_path_that_is_already_gone_is_just_forgotten(tmp_path, pending):
+    pending.add(str(tmp_path / "vanished.csv"))
+    inputs.retry_pending_deletes()
+    assert pending == set()
+
+
 # ---- sweeping leftovers --------------------------------------------------------------------------
 
 def test_sweep_removes_only_old_truealign_leftovers(tmp_path):

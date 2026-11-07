@@ -69,6 +69,31 @@ LEGACY_PREFIX = "truealign_"            # uploads used to be loose files named t
 STALE_AFTER_SECONDS = 24 * 3600
 _SAFE = re.compile(r"[^A-Za-z0-9_-]")
 _swept = False
+# Paths (files, or whole session folders) that could not be deleted, usually because Windows still had them open.
+# They are retried when the next file is released or written, when a new session starts, and by the sweep, so a
+# failed delete is not forgotten until the one-day cleanup.
+_pending: set = set()
+
+
+def _delete(path: str) -> bool:
+    """Delete a file or folder. A failure is recorded in _pending and returns False; "already gone" is success."""
+    try:
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        _pending.add(path)
+        return False
+    _pending.discard(path)
+    return True
+
+
+def retry_pending_deletes() -> int:
+    """Try again every delete that failed earlier. Returns how many were removed now."""
+    return sum(1 for path in list(_pending) if _delete(path))
 
 
 def sweep_stale_uploads(older_than: float = STALE_AFTER_SECONDS, directory: Optional[str] = None) -> int:
@@ -77,6 +102,7 @@ def sweep_stale_uploads(older_than: float = STALE_AFTER_SECONDS, directory: Opti
     (truealign_uploads_*) that has sat idle. A live session's folder is touched on every rerun
     (keep_session_folder_fresh), so it is never idle; any other entry, including a folder or file that merely starts
     with "truealign_", is left alone. Returns how many entries were removed."""
+    retry_pending_deletes()
     root = directory or tempfile.gettempdir()
     cutoff = time.time() - older_than
     removed = 0
@@ -118,13 +144,14 @@ class UploadStore:
     - The name on disk is built from the slot and the upload's id plus its extension; the user's file name is
       never used for a path.
     - A slot (for example "quality" or "heavy1") holds one file: replacing or clearing the upload deletes it.
-    - Everything goes when the store is garbage collected (the session ended) or the process exits.
+    - Everything goes when the store is garbage collected (the session ended) or the process exits. A delete that
+      fails (a file Windows still has open) is recorded and retried later, not forgotten.
     """
 
     def __init__(self, parent: Optional[str] = None):
         self.dir = tempfile.mkdtemp(prefix=STORE_DIR_PREFIX, dir=parent)
         self._slots = {}                                 # slot -> (upload id, path)
-        self._finalizer = weakref.finalize(self, shutil.rmtree, self.dir, True)
+        self._finalizer = weakref.finalize(self, _delete, self.dir)
 
     def put(self, slot: str, upload) -> str:
         upload_id = _SAFE.sub("_", str(upload.file_id))
@@ -132,6 +159,7 @@ class UploadStore:
         if current and current[0] == upload_id and os.path.isfile(current[1]):
             self.touch()
             return current[1]
+        retry_pending_deletes()
         self.release(slot)
         extension = os.path.splitext(os.path.basename(upload.name))[1].lower()
         extension = extension if extension in ALLOWED_EXTENSIONS else ""
@@ -165,12 +193,7 @@ class UploadStore:
     def release(self, slot: str) -> None:
         entry = self._slots.pop(slot, None)
         if entry:
-            try:
-                os.remove(entry[1])
-            except FileNotFoundError:
-                pass
-            except OSError:
-                pass            # still open (Windows) or already gone: the folder is removed with the session
+            _delete(entry[1])   # still open (Windows)? it is recorded and retried, and goes with the session folder
 
     def release_all(self) -> None:
         for slot in list(self._slots):
@@ -190,6 +213,7 @@ def upload_store() -> UploadStore:
     global _swept
     ss = st.session_state
     if "upload_store" not in ss:
+        retry_pending_deletes()
         if not _swept:
             _swept = True
             sweep_stale_uploads()
