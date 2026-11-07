@@ -171,6 +171,38 @@ def test_a_live_session_keeps_its_folder_fresh(store):
     assert os.path.isdir(store.dir)
 
 
+def test_sweep_never_touches_a_look_alike_folder_or_a_session_folder_that_is_a_file(tmp_path):
+    old = time.time() - 3 * 24 * 3600
+    lookalike_dir = tmp_path / "truealign_exports"                  # someone's own folder, merely similarly named
+    lookalike_dir.mkdir()
+    (lookalike_dir / "keep.csv").write_text("x")
+    legacy_named_dir = tmp_path / "truealign_quality_abc_data.csv"  # a directory wearing a legacy file name
+    legacy_named_dir.mkdir()
+    file_named_like_a_session = tmp_path / "truealign_uploads_notes.txt"
+    file_named_like_a_session.write_text("x")
+    for p in (lookalike_dir, legacy_named_dir, file_named_like_a_session):
+        os.utime(p, (old, old))
+    assert sweep_stale_uploads(directory=str(tmp_path)) == 0
+    assert lookalike_dir.exists() and legacy_named_dir.exists() and file_named_like_a_session.exists()
+    assert (lookalike_dir / "keep.csv").exists()
+
+
+def test_every_rerun_touches_the_session_folder_even_with_no_upload_activity(tmp_path):
+    store = UploadStore(parent=str(tmp_path))
+    store.put("quality", FakeUpload())
+    old = time.time() - 3 * 24 * 3600
+    os.utime(store.dir, (old, old))
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
+    at.session_state["is_guest"] = True
+    at.session_state["upload_store"] = store
+    at.query_params["auth"] = "guest"
+    at.run()                                                        # the landing page: no uploader involved
+    assert not at.exception, at.exception
+    assert os.stat(store.dir).st_mtime > time.time() - 60
+    assert sweep_stale_uploads(directory=str(tmp_path)) == 0
+    store._finalizer()
+
+
 # ---- wiring into the app --------------------------------------------------------------------------
 
 def test_resolve_input_uses_the_session_store_and_release_input_clears_it(monkeypatch, tmp_path):

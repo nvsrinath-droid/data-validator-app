@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 st.set_page_config(page_title="TrueAlign Data", page_icon="🎯", layout="wide")
 load_dotenv()
 
+from ui.inputs import keep_session_folder_fresh  # noqa: E402
 from ui.auth_view import render_header, require_login  # noqa: E402
 from ui.landing import render_landing  # noqa: E402
 from ui.pages import heavy, pushdown, quality, standard  # noqa: E402
@@ -17,6 +18,7 @@ PAGES = {"standard": standard.render, "heavy": heavy.render, "pushdown": pushdow
 
 inject_premium_css()
 init_state()
+keep_session_folder_fresh()
 sync_auth_with_url()
 render_header()
 require_login()

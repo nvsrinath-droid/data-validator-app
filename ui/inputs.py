@@ -72,9 +72,11 @@ _swept = False
 
 
 def sweep_stale_uploads(older_than: float = STALE_AFTER_SECONDS, directory: Optional[str] = None) -> int:
-    """Delete upload leftovers (from sessions that ended without cleaning up, or from older versions of the app)
-    that nothing has touched for a day. A live session touches its folder on every rerun, so it is never old.
-    Returns how many entries were removed."""
+    """Delete upload leftovers that nothing has touched for a day. Only two kinds of entry are ever candidates:
+    a loose file from older versions of the app (truealign_<tier>_<id>_<name>), and a session folder
+    (truealign_uploads_*) that has sat idle. A live session's folder is touched on every rerun
+    (keep_session_folder_fresh), so it is never idle; any other entry, including a folder or file that merely starts
+    with "truealign_", is left alone. Returns how many entries were removed."""
     root = directory or tempfile.gettempdir()
     cutoff = time.time() - older_than
     removed = 0
@@ -83,17 +85,20 @@ def sweep_stale_uploads(older_than: float = STALE_AFTER_SECONDS, directory: Opti
     except OSError:
         return 0
     for entry in entries:
-        if not entry.name.startswith(LEGACY_PREFIX):
-            continue
+        is_session_folder = entry.name.startswith(STORE_DIR_PREFIX)
+        is_legacy_name = entry.name.startswith(LEGACY_PREFIX) and not is_session_folder
         try:
+            if is_session_folder:
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+            elif not (is_legacy_name and entry.is_file(follow_symlinks=False)):
+                continue
             if entry.stat(follow_symlinks=False).st_mtime >= cutoff:
                 continue
-            if entry.is_dir(follow_symlinks=False):
-                shutil.rmtree(entry.path, ignore_errors=True)
-            elif entry.is_file(follow_symlinks=False):
-                os.remove(entry.path)
+            if is_session_folder:
+                shutil.rmtree(entry.path)
             else:
-                continue
+                os.remove(entry.path)
             removed += 1
         except OSError:
             pass                                        # in use or not ours to delete: leave it
@@ -125,7 +130,7 @@ class UploadStore:
         upload_id = _SAFE.sub("_", str(upload.file_id))
         current = self._slots.get(slot)
         if current and current[0] == upload_id and os.path.isfile(current[1]):
-            self._touch()
+            self.touch()
             return current[1]
         self.release(slot)
         extension = os.path.splitext(os.path.basename(upload.name))[1].lower()
@@ -133,7 +138,7 @@ class UploadStore:
         path = os.path.join(self.dir, f"{_SAFE.sub('_', slot)}_{upload_id}{extension}")
         self._write(path, upload)
         self._slots[slot] = (upload_id, path)
-        self._touch()
+        self.touch()
         return path
 
     def _write(self, path: str, upload) -> None:
@@ -174,7 +179,7 @@ class UploadStore:
     def files(self) -> list:
         return sorted(os.listdir(self.dir)) if os.path.isdir(self.dir) else []
 
-    def _touch(self) -> None:
+    def touch(self) -> None:
         try:
             os.utime(self.dir)
         except OSError:
@@ -190,6 +195,14 @@ def upload_store() -> UploadStore:
             sweep_stale_uploads()
         ss.upload_store = UploadStore()
     return ss.upload_store
+
+
+def keep_session_folder_fresh() -> None:
+    """Called on every rerun, so the folder of a session that is still open is never mistaken for an idle one by
+    another session's sweep (a folder's modification time only changes when files are added or removed)."""
+    store = st.session_state.get("upload_store")
+    if store is not None:
+        store.touch()
 
 
 def release_input(slot: str) -> None:
