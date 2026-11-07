@@ -204,12 +204,20 @@ class UploadStore:
                 fd = os.open(path, flags, 0o600)
             with os.fdopen(fd, "wb") as f:
                 f.write(upload.getbuffer())
-        except OSError as e:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-            raise UploadError(f"The uploaded file could not be saved ({e.strerror or type(e).__name__}).") from None
+        except (OSError, MemoryError) as e:
+            self._discard_partial(path)
+            reason = "not enough memory" if isinstance(e, MemoryError) else (e.strerror or type(e).__name__)
+            raise UploadError(f"The uploaded file could not be saved ({reason}).") from None
+        except BaseException:
+            self._discard_partial(path)         # anything else (a bug in getbuffer, Ctrl+C): clean up, then let it out
+            raise
+
+    @staticmethod
+    def _discard_partial(path: str) -> None:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
     def release(self, slot: str) -> None:
         entry = self._slots.pop(slot, None)

@@ -123,6 +123,27 @@ def test_a_failure_while_filling_leaves_no_half_written_file(store, monkeypatch)
     assert store.files() == []
 
 
+def test_a_memory_error_while_writing_becomes_an_upload_error_and_leaves_no_partial_file(store):
+    class Huge(FakeUpload):
+        def getbuffer(self):
+            raise MemoryError()
+    with pytest.raises(UploadError) as err:
+        store.put("quality", Huge())
+    assert "not enough memory" in str(err.value) and store.dir not in str(err.value)
+    assert store.files() == [] and store._slots == {}
+
+
+@pytest.mark.parametrize("exc", [ValueError("bug in getbuffer"), KeyboardInterrupt()])
+def test_any_other_failure_while_writing_also_removes_the_partial_file_and_propagates(store, exc):
+    class Broken(FakeUpload):
+        def getbuffer(self):
+            raise exc
+    with pytest.raises(type(exc)):
+        store.put("quality", Broken())
+    assert store.files() == [] and store._slots == {}
+    assert Path(store.put("quality", FakeUpload())).is_file()
+
+
 def test_an_untracked_file_in_the_way_is_replaced_not_fatal(store):
     leftover = Path(store.dir) / "quality_abc123.csv"
     leftover.write_bytes(b"old,stale")                              # same name, but no slot knows about it
