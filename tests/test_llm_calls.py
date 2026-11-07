@@ -117,3 +117,27 @@ def test_provider_failures_get_plain_messages_and_never_echo_the_key(monkeypatch
         AIAgent("deepseek/deepseek-chat", "sk-secret")._call_llm("hi")
     assert str(err.value).startswith("LLM Provider Error: ") and expected in str(err.value)
     assert "sk-secret" not in str(err.value)
+
+
+# ---- no retries, hard total deadline -----------------------------------------------------------
+
+def test_litellm_is_told_not_to_retry(monkeypatch):
+    seen = []
+    monkeypatch.setattr(agent_mod, "completion", lambda **kw: (seen.append(kw), mocked_completion()(**kw))[1])
+    AIAgent("deepseek/deepseek-chat", "k")._call_llm("hi")
+    assert seen[0]["max_retries"] == 0
+
+
+def test_a_call_that_ignores_its_own_timeout_is_abandoned_at_the_hard_deadline(monkeypatch):
+    release = threading.Event()
+    monkeypatch.setenv("TRUEALIGN_LLM_TIMEOUT", "0.2")
+    monkeypatch.setattr(agent_mod, "HARD_DEADLINE_GRACE", 0.3)
+    monkeypatch.setattr(agent_mod, "completion", lambda **kw: release.wait(30))   # a hung connection
+    started = time.time()
+    try:
+        with pytest.raises(RuntimeError) as err:
+            AIAgent("deepseek/deepseek-chat", "sk-secret")._call_llm("hi")
+    finally:
+        release.set()
+    assert time.time() - started < 5
+    assert "did not answer within 0.2 seconds" in str(err.value) and "sk-secret" not in str(err.value)

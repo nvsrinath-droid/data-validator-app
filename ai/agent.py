@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import warnings
 from typing import List, Optional, Tuple
 
@@ -26,6 +27,9 @@ def silence_litellm_serializer_warning() -> None:
 silence_litellm_serializer_warning()
 DEFAULT_LLM_TIMEOUT = 60.0
 TIMEOUT_ENV = "TRUEALIGN_LLM_TIMEOUT"
+# LiteLLM's `timeout` limits one HTTP attempt, and some providers' SDKs apply it per read, so a slow trickle of bytes
+# can outlive it. The call is therefore also given a hard total deadline: the timeout plus this grace period.
+HARD_DEADLINE_GRACE = 5.0
 MAX_SUGGESTED_CHECKS = 50
 
 
@@ -54,6 +58,30 @@ def friendly_llm_error(exc: Exception, model: str, timeout: float) -> str:
     if isinstance(exc, (litellm.APIConnectionError, litellm.ServiceUnavailableError)):
         return f"Could not reach the provider for {model}. Check your network connection and try again."
     return ""
+
+
+def _call_with_deadline(kwargs: dict, deadline: float):
+    """completion(**kwargs), abandoned after `deadline` seconds in total. The call runs in a daemon thread, which
+    cannot be killed: on expiry it is left to finish (its result is discarded) and the caller gets a Timeout."""
+    outcome = {}
+
+    def run():
+        try:
+            outcome["response"] = completion(**kwargs)
+        except BaseException as e:                 # handed to the caller's thread below
+            outcome["error"] = e
+
+    worker = threading.Thread(target=run, name="llm-call", daemon=True)
+    worker.start()
+    worker.join(deadline)
+    if worker.is_alive():
+        raise litellm.Timeout(message=f"no answer within {deadline:g} seconds in total",
+                              model=kwargs["model"], llm_provider=provider_of(kwargs["model"]))
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["response"]
+
+
 _CHECK_ADAPTER = TypeAdapter(CheckSpec)
 
 
@@ -103,6 +131,7 @@ class AIAgent:
             "messages": [{"role": "user", "content": prompt}],
             "api_key": self.api_key,
             "timeout": llm_timeout(),
+            "max_retries": 0,        # a retry would silently multiply the wait; the user can press the button again
         }
         provider = provider_of(self.model_name)
         if provider in TEMPERATURE_PROVIDERS:
@@ -111,7 +140,7 @@ class AIAgent:
             kwargs["response_format"] = {"type": "json_object"}
         silence_litellm_serializer_warning()   # a test runner or library may have reset the filters since import
         try:
-            response = completion(**kwargs)
+            response = _call_with_deadline(kwargs, kwargs["timeout"] + HARD_DEADLINE_GRACE)
             return response.choices[0].message.content
         except Exception as e:
             message = friendly_llm_error(e, self.model_name, kwargs["timeout"]) or str(e)
