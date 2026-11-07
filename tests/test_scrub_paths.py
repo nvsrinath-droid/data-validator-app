@@ -78,6 +78,31 @@ def test_things_that_are_not_paths_are_left_alone(text):
     assert scrub_paths(text) == text
 
 
+LOGIN_MESSAGES = [
+    r"Login failed for user 'CORP\jdoe'.",
+    "Login failed for user 'CORP\\\\jdoe'.",                   # the doubled form repr() gives
+    r"('28000', '[28000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Login failed for user 'CORP\svc_etl'.')",
+    r"ORA-01017: invalid username/password; logon denied for DOMAIN\ven",
+]
+
+
+@pytest.mark.parametrize("message", LOGIN_MESSAGES)
+def test_a_domain_login_is_not_a_path_in_any_pair(message, tmp_path):
+    """The backslash in DOMAIN\\user is not a path: the message is the only clue the user has."""
+    from sqlalchemy.engine import URL
+    from core.sources import ConnectorPair, FilePair, PushdownPair
+
+    class Conn:
+        engine = type("E", (), {"url": URL.create("mssql+pyodbc", username="u", password="pw", host="h")})()
+
+    pushdown = PushdownPair.__new__(PushdownPair)                  # no database needed to test redact()
+    pushdown.engine = Conn.engine
+    pairs = [ConnectorPair(Conn(), Conn()), FilePair(str(tmp_path / "a.csv"), str(tmp_path / "b.csv")), pushdown]
+    assert scrub_paths(message) == message
+    for pair in pairs:
+        assert pair.redact(message) == message
+
+
 def test_known_paths_with_spaces_are_replaced_in_every_spelling(tmp_path):
     known = str(tmp_path / "My Upload Dir" / "q_1.csv")
     for spelling in (known, known.replace("\\", "/"), known.replace("\\", "\\\\")):
