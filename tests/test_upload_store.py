@@ -91,10 +91,11 @@ def test_everything_is_deleted_when_the_session_object_goes_away(tmp_path):
     assert not os.path.exists(folder)
 
 
-def test_an_open_file_that_cannot_be_deleted_does_not_raise(store, monkeypatch):
-    store.put("quality", FakeUpload())
+def test_an_open_file_that_cannot_be_deleted_does_not_raise_and_is_remembered(store, monkeypatch, pending):
+    path = store.put("quality", FakeUpload())
     monkeypatch.setattr(os, "remove", lambda p: (_ for _ in ()).throw(PermissionError("in use")))
     store.release("quality")                                        # Windows: file still open elsewhere
+    assert pending == {path}                                        # not forgotten, and nothing else is recorded
 
 
 class FailingUpload(FakeUpload):
@@ -163,8 +164,10 @@ def test_resolve_input_shows_a_message_instead_of_crashing_when_saving_fails(mon
 
 # ---- deletes that failed are remembered and retried ----------------------------------------------
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def pending(monkeypatch):
+    """The record of failed deletes is module-global; every test in this file gets its own, so a delete one test
+    makes fail on purpose is never retried (or asserted on) by another."""
     fresh = set()
     monkeypatch.setattr(inputs, "_pending", fresh)
     return fresh
