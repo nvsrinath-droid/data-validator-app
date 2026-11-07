@@ -115,6 +115,22 @@ def test_network_paths_are_refused_even_with_local_paths_enabled(value):
     assert "quality_profile" not in at.session_state or at.session_state["quality_profile"] is None
 
 
+MIXED_UNC = [r"/\host\share\x.csv", r"\/host/share/x.csv", r"\??\UNC\host\share\x.csv", "/\\host/share/x.csv"]
+
+
+@pytest.mark.parametrize("value", MIXED_UNC)
+def test_mixed_separator_and_nt_device_forms_are_network_paths(value):
+    assert is_network_path(clean_path(value))
+
+
+@pytest.mark.parametrize("value", MIXED_UNC)
+def test_mixed_separator_network_paths_are_refused_in_the_box(value):
+    at = open_tier("quality")
+    at.text_input(key="qfile_0").set_value(value).run()
+    assert not at.exception, at.exception
+    assert any("Network (UNC) paths are not allowed" in e.value for e in at.error), [e.value for e in at.error]
+
+
 def test_ordinary_paths_are_not_mistaken_for_network_paths(spaced_csv):
     assert not any(is_network_path(p) for p in (spaced_csv, WIN, "/tmp/x.csv", "relative/x.csv", "C:/a/b.csv"))
 

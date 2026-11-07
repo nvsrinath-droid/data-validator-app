@@ -61,7 +61,10 @@ def clean_path(raw: str) -> str:
 def is_network_path(cleaned: str) -> bool:
     r"""UNC and device paths (\\host\share, //host/share, \\?\...). Opening one makes Windows contact that host
     and send the account's credentials to it (NTLM), so a path box must never follow one, whatever the extension."""
-    return cleaned.startswith(("\\\\", "//"))
+    # Windows treats / and \ alike, so /\host, \/host and //host all mean \\host. Spelled out with replace() instead
+    # of os.path, so that the answer is the same on every OS.
+    unified = cleaned.replace("/", "\\")
+    return unified.startswith(("\\\\", "\\??\\"))
 
 
 STORE_DIR_PREFIX = "truealign_uploads_"
@@ -255,10 +258,10 @@ def resolve_input(upload, path: str, prefix: str) -> Optional[str]:
         cleaned = clean_path(path)
         if not cleaned:
             return None
-        if is_network_path(cleaned):              # before normpath, which would turn // into \ on Windows
+        norm_path = os.path.normpath(cleaned)
+        if is_network_path(cleaned) or is_network_path(norm_path):   # whichever spelling Windows would resolve
             st.error("❌ Network (UNC) paths are not allowed. Use a path on this machine, or upload the file.")
             return None
-        norm_path = os.path.normpath(cleaned)
         if not norm_path.lower().endswith(ALLOWED_EXTENSIONS):
             # Checked before the file is looked up, so the message does not reveal whether a path exists.
             st.error(f"❌ Only {', '.join(ALLOWED_EXTENSIONS)} files can be opened by path.")
