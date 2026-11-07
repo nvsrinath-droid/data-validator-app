@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from ai.agent import AIAgent
+from core.db import scrub_paths
 from core.quality.engine import QualityEngine
 from core.quality.profile import profile_file
 from core.quality.report import report_json, results_csv
@@ -169,7 +170,7 @@ def render():
         profile = _load_profile(path)
     except Exception as e:  # unreadable file, bad Excel, DuckDB parse error: say so, keep the app alive
         ss.pop("quality_source", None)
-        st.error(f"Could not read the file: {e}")
+        st.error(f"Could not read the file: {scrub_paths(str(e), [path])}")
         return
 
     st.subheader("🔎 Profile")
@@ -203,6 +204,6 @@ def render():
                 ss.quality_result = QualityEngine(specs).run(path)
             except Exception as e:
                 ss.pop("quality_result", None)
-                st.error(f"Could not run the checks: {e}")
+                st.error(f"Could not run the checks: {scrub_paths(str(e), [path])}")
     if ss.get("quality_result") is not None:
         _render_result(ss.quality_result, specs, agent, hide, extremes)

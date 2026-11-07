@@ -240,12 +240,12 @@ def resolve_input(upload, path: str, prefix: str) -> Optional[str]:
             st.error(f"❌ Only {', '.join(ALLOWED_EXTENSIONS)} files can be opened by path.")
             return None
         if os.path.isdir(norm_path):
-            st.error(f"❌ `{norm_path}` is a folder. Give the path of the file itself.")
+            st.error("❌ That path is a folder. Give the path of the file itself.")
         elif not os.path.isfile(norm_path):
-            st.error(f"❌ Server path not found: `{norm_path}`. Check the spelling, and that the file is on the "
-                     f"machine running the app.")
+            st.error("❌ Server path not found. Check the spelling, and that the file is on the machine running "
+                     "the app.")
         elif not os.access(norm_path, os.R_OK):
-            st.error(f"❌ `{norm_path}` exists but the app is not allowed to read it.")
+            st.error("❌ That file exists but the app is not allowed to read it.")
         else:
             return norm_path
     return None

@@ -8,7 +8,7 @@ from typing import List, Optional
 import pandas as pd
 
 from core.comparator import DataComparator
-from core.db import get_engine, redact, sample_query
+from core.db import get_engine, redact, sample_query, scrub_paths
 from core.engines.duckdb_engine import DuckDBEngine
 from core.engines.sql_pushdown import DEFAULT_SAMPLE_LIMIT, SQLPushdownEngine
 from core.results import ComparisonResult
@@ -32,7 +32,7 @@ class DataPair:
         raise NotImplementedError
 
     def redact(self, message: str) -> str:
-        return message
+        return scrub_paths(message)
 
 
 class ConnectorPair(DataPair):
@@ -53,7 +53,7 @@ class ConnectorPair(DataPair):
         for conn in self.connectors.values():
             engine = getattr(conn, "engine", None)
             message = redact(message, getattr(engine, "url", None))
-        return message
+        return scrub_paths(message)
 
 
 class FilePair(DataPair):
@@ -71,6 +71,9 @@ class FilePair(DataPair):
 
     def run(self, config):
         return DuckDBEngine(config).compare(self.paths["source"], self.paths["target"])
+
+    def redact(self, message):
+        return scrub_paths(message, self.paths.values())
 
 
 class PushdownPair(DataPair):
@@ -91,4 +94,4 @@ class PushdownPair(DataPair):
                                                  sample_limit=self.sample_limit)
 
     def redact(self, message):
-        return redact(message, self.engine.url)
+        return scrub_paths(redact(message, self.engine.url))

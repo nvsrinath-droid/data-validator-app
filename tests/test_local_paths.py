@@ -145,3 +145,41 @@ def test_an_xls_file_can_be_profiled_by_path():
     assert not at.error
     profile = at.session_state["quality_profile"]
     assert profile.row_count == 3 and [c.name for c in profile.columns] == ["ID", "Amount"]
+
+
+# ---- error messages never echo paths -----------------------------------------------------------
+
+def test_path_box_errors_do_not_echo_the_path(tmp_path, spaced_csv):
+    at = open_tier("quality")
+    folder = tmp_path / "SecretFolderName.csv"
+    folder.mkdir()
+    for value in (str(folder), str(tmp_path / "SecretMissingDir" / "x.csv")):
+        at.text_input(key="qfile_0").set_value(value).run()
+        assert at.error, value
+        for e in at.error:
+            assert "SecretFolderName" not in e.value and "SecretMissingDir" not in e.value and str(tmp_path) not in e.value
+
+
+def test_read_errors_from_the_engine_have_paths_scrubbed(tmp_path, monkeypatch):
+    import ui.pages.quality as quality_page
+    bad = tmp_path / "Secret Dir" / "broken.csv"
+    bad.parent.mkdir()
+    bad.write_text("a,b\n1,2\n")
+
+    def boom(path):
+        raise OSError(f"IO Error: Could not read {path} (also /var/secret/area/other.csv)")
+    monkeypatch.setattr(quality_page, "_load_profile", boom)
+    at = open_tier("quality")
+    at.text_input(key="qfile_0").set_value(str(bad)).run()
+    texts = [e.value for e in at.error]
+    assert texts and all("Secret Dir" not in t and "/var/secret" not in t and "<file>" in t for t in texts), texts
+
+
+def test_scrub_paths_handles_known_and_unknown_paths():
+    from core.db import scrub_paths
+    known = r"C:\Users\Ven Nanduri\My Data\a b.csv"
+    msg = (f"cannot open {known}; " + r"temp was C:\Temp\truealign_uploads_x\q.csv; share \\host\s\f.csv; "
+           "/tmp/x/y.csv; 3/4 is fine")
+    out = scrub_paths(msg, [known])
+    assert "Ven Nanduri" not in out and "truealign_uploads" not in out and "host" not in out and "/tmp/x" not in out
+    assert out.count("<file>") == 4 and "3/4 is fine" in out

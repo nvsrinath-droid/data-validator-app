@@ -3,7 +3,8 @@
 URLs are built with SQLAlchemy's URL.create(), so passwords containing @ : / % # etc.
 work without manual escaping, and the password is masked whenever the URL is printed.
 """
-from typing import List, Optional
+import re
+from typing import Iterable, List, Optional
 
 import pandas as pd
 from sqlalchemy import create_engine
@@ -63,6 +64,23 @@ def redact(message: str, url: Optional[URL]) -> str:
     if url is not None and url.password:
         message = message.replace(str(url.password), "***")
     return message
+
+
+_PATH_LIKE = re.compile(
+    r"""\\[^\s'"`<>|*?]+"""                       # \host\share\...
+    r"""|[A-Za-z]:[\/][^\s'"`<>|*?]+"""            # C:\dir\file, C:/dir/file
+    r"""|(?<![\w.:/-])/(?:[\w.~-]+/)+[\w.~-]*"""    # /var/tmp/file
+)
+
+
+def scrub_paths(message: str, known: Iterable[str] = ()) -> str:
+    r"""Replace file-system paths in an error message with <file> before showing it to the user: the text of a
+    pandas / DuckDB / OS error names the server's folders (the private upload folder, the temp directory, the file
+    the user typed). `known` paths are replaced exactly (so spaces in them are fine); anything else that looks like
+    an absolute path (C:\..., \host\..., /var/...) is replaced by pattern."""
+    for path in sorted({str(p) for p in known if p}, key=len, reverse=True):
+        message = message.replace(path, "<file>")
+    return _PATH_LIKE.sub("<file>", message)
 
 
 def get_engine(url) -> Engine:
