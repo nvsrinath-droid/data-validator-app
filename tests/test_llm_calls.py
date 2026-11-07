@@ -119,6 +119,59 @@ def test_provider_failures_get_plain_messages_and_never_echo_the_key(monkeypatch
     assert "sk-secret" not in str(err.value)
 
 
+@pytest.fixture
+def hung_calls(monkeypatch):
+    """completion() that blocks until the test releases it, with a tiny deadline, and a clean abandoned list."""
+    release = threading.Event()
+    calls = []
+    monkeypatch.setenv("TRUEALIGN_LLM_TIMEOUT", "0.05")
+    monkeypatch.setattr(agent_mod, "HARD_DEADLINE_GRACE", 0.05)
+    monkeypatch.setattr(agent_mod, "_abandoned", [])
+    monkeypatch.setattr(agent_mod, "completion", lambda **kw: (calls.append(kw), release.wait(30))[1])
+    yield release, calls
+    release.set()
+
+
+def test_after_the_cap_of_hung_calls_new_calls_are_refused_without_contacting_the_provider(hung_calls, monkeypatch):
+    release, calls = hung_calls
+    monkeypatch.setattr(agent_mod, "MAX_ABANDONED_CALLS", 2)
+    agent = AIAgent("deepseek/deepseek-chat", "sk-secret")
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="did not answer"):
+            agent._call_llm("hi")
+    assert len(calls) == 2
+    with pytest.raises(RuntimeError) as err:
+        agent._call_llm("hi")
+    text = str(err.value)
+    assert len(calls) == 2                                          # the third never reached completion()
+    assert "2 earlier requests" in text and "still hanging" in text and "restart" in text
+    assert "sk-secret" not in text and not text.startswith("LLM Provider Error")
+
+
+def test_calls_are_accepted_again_once_the_hung_ones_finish(hung_calls, monkeypatch):
+    release, calls = hung_calls
+    monkeypatch.setattr(agent_mod, "MAX_ABANDONED_CALLS", 1)
+    agent = AIAgent("deepseek/deepseek-chat", "k")
+    with pytest.raises(RuntimeError, match="did not answer"):
+        agent._call_llm("hi")
+    with pytest.raises(RuntimeError, match="still hanging"):
+        agent._call_llm("hi")
+    release.set()                                                   # the provider finally answers the old call
+    for t in list(agent_mod._abandoned):
+        t.join(5)
+    monkeypatch.setattr(agent_mod, "completion", mocked_completion())
+    assert agent._call_llm("hi") == "hello"
+    assert agent_mod._abandoned == []
+
+
+def test_a_call_that_finishes_before_its_deadline_is_never_counted(monkeypatch):
+    monkeypatch.setattr(agent_mod, "_abandoned", [])
+    monkeypatch.setattr(agent_mod, "completion", mocked_completion())
+    for _ in range(agent_mod.MAX_ABANDONED_CALLS + 2):
+        assert AIAgent("deepseek/deepseek-chat", "k")._call_llm("hi") == "hello"
+    assert agent_mod._abandoned == []
+
+
 # ---- no retries, hard total deadline -----------------------------------------------------------
 
 def test_litellm_is_told_not_to_retry(monkeypatch):

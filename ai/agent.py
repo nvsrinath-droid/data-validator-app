@@ -30,6 +30,15 @@ TIMEOUT_ENV = "TRUEALIGN_LLM_TIMEOUT"
 # LiteLLM's `timeout` limits one HTTP attempt, and some providers' SDKs apply it per read, so a slow trickle of bytes
 # can outlive it. The call is therefore also given a hard total deadline: the timeout plus this grace period.
 HARD_DEADLINE_GRACE = 5.0
+# A thread that is past its deadline cannot be killed. Each one holds a connection until the provider lets go, so
+# once this many are still running, new calls are refused instead of piling up more.
+MAX_ABANDONED_CALLS = 4
+_abandoned: list = []                 # worker threads that outlived their deadline and are still running
+_abandoned_lock = threading.Lock()
+
+
+class TooManyHungCalls(Exception):
+    """Refused without calling the provider: too many earlier calls are still hanging."""
 MAX_SUGGESTED_CHECKS = 50
 
 
@@ -71,10 +80,18 @@ def _call_with_deadline(kwargs: dict, deadline: float):
         except BaseException as e:                 # handed to the caller's thread below
             outcome["error"] = e
 
+    with _abandoned_lock:
+        _abandoned[:] = [t for t in _abandoned if t.is_alive()]
+        if len(_abandoned) >= MAX_ABANDONED_CALLS:
+            raise TooManyHungCalls(
+                f"{len(_abandoned)} earlier requests to the AI provider are still hanging and cannot be cancelled. "
+                f"Wait for them to finish, check your network or provider status, or restart the app.")
     worker = threading.Thread(target=run, name="llm-call", daemon=True)
     worker.start()
     worker.join(deadline)
     if worker.is_alive():
+        with _abandoned_lock:
+            _abandoned.append(worker)
         raise litellm.Timeout(message=f"no answer within {deadline:g} seconds in total",
                               model=kwargs["model"], llm_provider=provider_of(kwargs["model"]))
     if "error" in outcome:
@@ -142,6 +159,8 @@ class AIAgent:
         try:
             response = _call_with_deadline(kwargs, kwargs["timeout"] + HARD_DEADLINE_GRACE)
             return response.choices[0].message.content
+        except TooManyHungCalls as e:                  # not the provider's fault: no "LLM Provider Error" prefix
+            raise RuntimeError(str(e)) from None
         except Exception as e:
             message = friendly_llm_error(e, self.model_name, kwargs["timeout"]) or str(e)
             if self.api_key:
