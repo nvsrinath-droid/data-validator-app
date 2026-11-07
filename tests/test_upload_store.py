@@ -9,7 +9,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 import ui.inputs as inputs
-from ui.inputs import UploadStore, sweep_stale_uploads
+from ui.inputs import UploadError, UploadStore, sweep_stale_uploads
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -94,6 +94,49 @@ def test_an_open_file_that_cannot_be_deleted_does_not_raise(store, monkeypatch):
     store.put("quality", FakeUpload())
     monkeypatch.setattr(os, "remove", lambda p: (_ for _ in ()).throw(PermissionError("in use")))
     store.release("quality")                                        # Windows: file still open elsewhere
+
+
+class FailingUpload(FakeUpload):
+    def getbuffer(self):
+        raise OSError(28, "No space left on device")
+
+
+def test_a_failed_write_removes_the_partial_file_and_raises_a_clean_error(store):
+    with pytest.raises(UploadError) as err:
+        store.put("quality", FailingUpload())
+    assert store.files() == [] and store._slots == {}
+    assert "No space left" in str(err.value) and store.dir not in str(err.value) and "quality_" not in str(err.value)
+    assert Path(store.put("quality", FakeUpload())).is_file()       # and the slot is usable afterwards
+
+
+def test_a_failure_while_filling_leaves_no_half_written_file(store, monkeypatch):
+    real_fdopen = os.fdopen
+
+    def writes_then_dies(fd, mode):
+        f = real_fdopen(fd, mode)
+        f.write = lambda data: (_ for _ in ()).throw(OSError(28, "No space left on device"))
+        return f
+    monkeypatch.setattr(os, "fdopen", writes_then_dies)
+    with pytest.raises(UploadError):
+        store.put("quality", FakeUpload())
+    assert store.files() == []
+
+
+def test_an_untracked_file_in_the_way_is_replaced_not_fatal(store):
+    leftover = Path(store.dir) / "quality_abc123.csv"
+    leftover.write_bytes(b"old,stale")                              # same name, but no slot knows about it
+    assert Path(store.put("quality", FakeUpload())).read_bytes() == b"a,b\n1,2\n"
+    assert store.files() == ["quality_abc123.csv"]
+
+
+def test_resolve_input_shows_a_message_instead_of_crashing_when_saving_fails(monkeypatch, tmp_path):
+    errors = []
+    monkeypatch.setattr(inputs.st, "error", errors.append)
+    monkeypatch.setattr(inputs, "upload_store", lambda: store)
+    store = UploadStore(parent=str(tmp_path))
+    assert inputs.resolve_input(FailingUpload(), "", "quality") is None
+    assert len(errors) == 1 and "could not be saved" in errors[0] and str(tmp_path) not in errors[0]
+    store._finalizer()
 
 
 # ---- sweeping leftovers --------------------------------------------------------------------------

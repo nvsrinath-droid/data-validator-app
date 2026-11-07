@@ -100,6 +100,10 @@ def sweep_stale_uploads(older_than: float = STALE_AFTER_SECONDS, directory: Opti
     return removed
 
 
+class UploadError(Exception):
+    """An upload could not be written to the session folder. The message is safe to show: it names no path."""
+
+
 class UploadStore:
     """One session's uploaded files, kept in a private folder and deleted as soon as they are not needed.
 
@@ -127,12 +131,31 @@ class UploadStore:
         extension = os.path.splitext(os.path.basename(upload.name))[1].lower()
         extension = extension if extension in ALLOWED_EXTENSIONS else ""
         path = os.path.join(self.dir, f"{_SAFE.sub('_', slot)}_{upload_id}{extension}")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
-        with os.fdopen(os.open(path, flags, 0o600), "wb") as f:
-            f.write(upload.getbuffer())
+        self._write(path, upload)
         self._slots[slot] = (upload_id, path)
         self._touch()
         return path
+
+    def _write(self, path: str, upload) -> None:
+        """Create `path` (owner-only, never overwriting) and fill it. If anything fails the partial file is removed
+        and an UploadError, which does not name the path, is raised."""
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        try:
+            try:
+                fd = os.open(path, flags, 0o600)
+            except FileExistsError:
+                # Not tracked by any slot, so a leftover of this session's own folder (a crash between the write and
+                # the bookkeeping, or a failed delete): replace it rather than fail.
+                os.remove(path)
+                fd = os.open(path, flags, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(upload.getbuffer())
+        except OSError as e:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            raise UploadError(f"The uploaded file could not be saved ({e.strerror or type(e).__name__}).") from None
 
     def release(self, slot: str) -> None:
         entry = self._slots.pop(slot, None)
@@ -185,7 +208,11 @@ def release_all_inputs() -> None:
 def resolve_input(upload, path: str, prefix: str) -> Optional[str]:
     """Uploaded file -> its private temp path (written once per upload), or a validated server-side path."""
     if upload:
-        return upload_store().put(prefix, upload)
+        try:
+            return upload_store().put(prefix, upload)
+        except UploadError as e:
+            st.error(f"❌ {e}")
+            return None
     release_input(prefix)
     if path and local_paths_allowed():
         cleaned = clean_path(path)
