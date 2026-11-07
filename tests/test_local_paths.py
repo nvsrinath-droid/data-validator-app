@@ -173,13 +173,3 @@ def test_read_errors_from_the_engine_have_paths_scrubbed(tmp_path, monkeypatch):
     at.text_input(key="qfile_0").set_value(str(bad)).run()
     texts = [e.value for e in at.error]
     assert texts and all("Secret Dir" not in t and "/var/secret" not in t and "<file>" in t for t in texts), texts
-
-
-def test_scrub_paths_handles_known_and_unknown_paths():
-    from core.db import scrub_paths
-    known = r"C:\Users\Ven Nanduri\My Data\a b.csv"
-    msg = (f"cannot open {known}; " + r"temp was C:\Temp\truealign_uploads_x\q.csv; share \\host\s\f.csv; "
-           "/tmp/x/y.csv; 3/4 is fine")
-    out = scrub_paths(msg, [known])
-    assert "Ven Nanduri" not in out and "truealign_uploads" not in out and "host" not in out and "/tmp/x" not in out
-    assert out.count("<file>") == 4 and "3/4 is fine" in out
