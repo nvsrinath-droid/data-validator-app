@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from ui.inputs import clean_path, local_paths_allowed
+from ui.inputs import clean_path, is_network_path, local_paths_allowed
 
 ROOT = Path(__file__).resolve().parents[1]
 LRE, PDF, LRM, ZWSP, BOM, NBSP = "\u202a", "\u202c", "\u200e", "\u200b", "\ufeff", "\u00a0"
@@ -102,6 +102,21 @@ def test_error_messages_say_what_is_wrong(tmp_path, spaced_csv):
         assert any(expected in e.value for e in at.error), (value, [e.value for e in at.error])
     at.text_input(key="qfile_0").set_value(spaced_csv).run()
     assert not at.error                                                          # and a good path clears them
+
+
+@pytest.mark.parametrize("value", [r"\\attacker\share\x.csv", "//attacker/share/x.csv", r"\\?\C:\x.csv",
+                                   '"' + r"\\attacker\share\x.csv" + '"', LRE + r"\\attacker\share\x.csv"])
+def test_network_paths_are_refused_even_with_local_paths_enabled(value):
+    assert local_paths_allowed() and is_network_path(clean_path(value))
+    at = open_tier("quality")
+    at.text_input(key="qfile_0").set_value(value).run()
+    assert not at.exception, at.exception
+    assert any("Network (UNC) paths are not allowed" in e.value for e in at.error)
+    assert "quality_profile" not in at.session_state or at.session_state["quality_profile"] is None
+
+
+def test_ordinary_paths_are_not_mistaken_for_network_paths(spaced_csv):
+    assert not any(is_network_path(p) for p in (spaced_csv, WIN, "/tmp/x.csv", "relative/x.csv", "C:/a/b.csv"))
 
 
 # ---- the massive-files tier ---------------------------------------------------------------------
