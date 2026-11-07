@@ -152,8 +152,25 @@ class UploadStore:
     """
 
     def __init__(self, parent: Optional[str] = None):
-        self.dir = tempfile.mkdtemp(prefix=STORE_DIR_PREFIX, dir=parent)
+        self._parent = parent
         self._slots = {}                                 # slot -> (upload id, path)
+        self.dir = tempfile.mkdtemp(prefix=STORE_DIR_PREFIX, dir=parent)
+        self._finalizer = weakref.finalize(self, _delete, self.dir)
+
+    def _ensure_dir(self) -> None:
+        """Something outside the app (another instance's sweep, Storage Sense, a temp cleaner) removed the folder
+        while the session was open. Make a new private one, never re-create the old name: a folder that appeared
+        under that name since is not ours. Files from the old folder are gone, so their slots are forgotten and
+        the next put writes them again."""
+        if os.path.isdir(self.dir):
+            return
+        try:
+            new_dir = tempfile.mkdtemp(prefix=STORE_DIR_PREFIX, dir=self._parent)
+        except OSError as e:
+            raise UploadError(f"The upload folder could not be created ({e.strerror or type(e).__name__}).") from None
+        self._finalizer.detach()
+        self._slots.clear()
+        self.dir = new_dir
         self._finalizer = weakref.finalize(self, _delete, self.dir)
 
     def put(self, slot: str, upload) -> str:
@@ -163,6 +180,7 @@ class UploadStore:
             self.touch()
             return current[1]
         retry_pending_deletes()
+        self._ensure_dir()
         self.release(slot)
         extension = os.path.splitext(os.path.basename(upload.name))[1].lower()
         extension = extension if extension in ALLOWED_EXTENSIONS else ""
@@ -206,9 +224,11 @@ class UploadStore:
         return sorted(os.listdir(self.dir)) if os.path.isdir(self.dir) else []
 
     def touch(self) -> None:
+        """Mark the folder as in use. Also brings it back if it was deleted under a live session."""
         try:
+            self._ensure_dir()
             os.utime(self.dir)
-        except OSError:
+        except (OSError, UploadError):
             pass
 
 

@@ -1,6 +1,7 @@
 """Uploaded files: private temp folder, restrictive permissions, deleted when no longer needed."""
 import gc
 import os
+import shutil
 import stat
 import time
 from pathlib import Path
@@ -251,6 +252,55 @@ def test_every_rerun_touches_the_session_folder_even_with_no_upload_activity(tmp
     assert os.stat(store.dir).st_mtime > time.time() - 60
     assert sweep_stale_uploads(directory=str(tmp_path)) == 0
     store._finalizer()
+
+
+def test_a_session_folder_deleted_underneath_a_live_session_is_recreated_on_the_next_upload(store, tmp_path):
+    first = store.put("quality", FakeUpload())
+    old_dir = store.dir
+    shutil.rmtree(old_dir)                                          # another instance's sweep, Storage Sense, ...
+    second = store.put("quality", FakeUpload(content=b"c\n9\n"))
+    assert Path(second).read_bytes() == b"c\n9\n" and os.path.isfile(second)
+    assert store.dir != old_dir and Path(store.dir).parent == tmp_path and second != first
+    assert store.files() == ["quality_abc123.csv"]
+
+
+def test_the_folder_is_recreated_by_the_per_rerun_touch_too(store):
+    store.put("quality", FakeUpload())
+    shutil.rmtree(store.dir)
+    store.touch()
+    assert os.path.isdir(store.dir) and store.files() == []         # empty again: the slot is forgotten
+    assert store._slots == {}
+    assert Path(store.put("quality", FakeUpload())).is_file()       # and the same upload is written again
+
+
+def test_a_recreated_folder_is_the_one_removed_at_session_end(tmp_path):
+    s = UploadStore(parent=str(tmp_path))
+    s.put("quality", FakeUpload())
+    shutil.rmtree(s.dir)
+    s.put("quality", FakeUpload())
+    folder = s.dir
+    del s
+    gc.collect()
+    assert not os.path.exists(folder) and list(tmp_path.iterdir()) == []
+
+
+def test_a_recreated_folder_gets_a_new_random_name_not_the_old_one(store):
+    """The old name could have been taken by another account in the meantime, so it is never created again."""
+    names = {store.dir}
+    for _ in range(3):
+        shutil.rmtree(store.dir)
+        store.put("quality", FakeUpload())
+        names.add(store.dir)
+    assert len(names) == 4 and all(Path(n).name.startswith("truealign_uploads_") for n in names)
+
+
+def test_an_upload_error_not_a_crash_when_the_folder_cannot_be_recreated(store, monkeypatch):
+    shutil.rmtree(store.dir)
+    monkeypatch.setattr(inputs.tempfile, "mkdtemp", lambda **kw: (_ for _ in ()).throw(OSError(13, "Permission denied")))
+    with pytest.raises(UploadError) as err:
+        store.put("quality", FakeUpload())
+    assert "Permission denied" in str(err.value) and store.dir not in str(err.value)
+    store.touch()                                                   # the per-rerun touch never raises
 
 
 # ---- wiring into the app --------------------------------------------------------------------------
