@@ -186,11 +186,22 @@ def test_a_call_that_ignores_its_own_timeout_is_abandoned_at_the_hard_deadline(m
     monkeypatch.setenv("TRUEALIGN_LLM_TIMEOUT", "0.2")
     monkeypatch.setattr(agent_mod, "HARD_DEADLINE_GRACE", 0.3)
     monkeypatch.setattr(agent_mod, "completion", lambda **kw: release.wait(30))   # a hung connection
+    monkeypatch.setattr(agent_mod, "_abandoned", [])
     started = time.time()
     try:
         with pytest.raises(RuntimeError) as err:
             AIAgent("deepseek/deepseek-chat", "sk-secret")._call_llm("hi")
     finally:
         release.set()
-    assert time.time() - started < 5
-    assert "did not answer within 0.2 seconds" in str(err.value) and "sk-secret" not in str(err.value)
+    elapsed = time.time() - started
+    assert 0.5 <= elapsed < 5
+    # The user waited timeout + grace (0.2 + 0.3), so that is what the message says, not the 0.2 s timeout.
+    assert "did not answer within 0.5 seconds" in str(err.value) and "sk-secret" not in str(err.value)
+
+
+def test_the_message_for_an_ordinary_timeout_still_names_the_timeout(monkeypatch):
+    monkeypatch.setenv("TRUEALIGN_LLM_TIMEOUT", "0.2")
+    monkeypatch.setattr(agent_mod, "HARD_DEADLINE_GRACE", 30)
+    monkeypatch.setattr(agent_mod, "completion", mocked_completion(mock_timeout=True))
+    with pytest.raises(RuntimeError, match="did not answer within 0.2 seconds"):
+        AIAgent("deepseek/deepseek-chat", "k")._call_llm("hi")

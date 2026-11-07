@@ -55,7 +55,8 @@ def llm_timeout() -> float:
 def friendly_llm_error(exc: Exception, model: str, timeout: float) -> str:
     """One plain sentence for the failures a user can act on. Anything else keeps the provider's own text."""
     if isinstance(exc, litellm.Timeout):          # before APIConnectionError, which it subclasses
-        return (f"{model} did not answer within {timeout:g} seconds. Try again, pick a faster model, or raise "
+        waited = getattr(exc, "waited", timeout)  # the hard deadline waited longer than the per-attempt timeout
+        return (f"{model} did not answer within {waited:g} seconds. Try again, pick a faster model, or raise "
                 f"{TIMEOUT_ENV}.")
     if isinstance(exc, litellm.AuthenticationError):
         return f"The provider rejected the API key for {model}. Check the key in Settings."
@@ -92,8 +93,10 @@ def _call_with_deadline(kwargs: dict, deadline: float):
     if worker.is_alive():
         with _abandoned_lock:
             _abandoned.append(worker)
-        raise litellm.Timeout(message=f"no answer within {deadline:g} seconds in total",
-                              model=kwargs["model"], llm_provider=provider_of(kwargs["model"]))
+        timeout = litellm.Timeout(message=f"no answer within {deadline:g} seconds in total",
+                                  model=kwargs["model"], llm_provider=provider_of(kwargs["model"]))
+        timeout.waited = deadline                  # what the user actually waited, for the message
+        raise timeout
     if "error" in outcome:
         raise outcome["error"]
     return outcome["response"]
