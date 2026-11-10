@@ -22,7 +22,9 @@ def leaky(tmp_path):
     db = tmp_path / SECRET / "warehouse.db"
     db.parent.mkdir()
     db.touch()                      # the path box now checks that the file exists before a connection is tried
-    return db, OSError(f"unable to open database file {db} (also {tmp_path / SECRET / 'other data.csv'})")
+    # Quoted Windows-style paths, the form scrub_paths recognises without being told (the same on every OS).
+    return db, OSError(rf"unable to open database file 'C:\data\{SECRET}\warehouse.db' "
+                       rf"(also 'C:\data\{SECRET}\other data.csv')")
 
 
 def test_pushdown_connection_failure_names_no_path(tmp_path, monkeypatch):

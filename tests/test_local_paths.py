@@ -209,9 +209,9 @@ def test_read_errors_from_the_engine_have_paths_scrubbed(tmp_path, monkeypatch):
     bad.write_text("a,b\n1,2\n")
 
     def boom(path):
-        raise OSError(f"IO Error: Could not read {path} (also /var/secret/area/other.csv)")
+        raise OSError(f"IO Error: Could not read {path} (also 'D:\\secret\\area\\other.csv')")
     monkeypatch.setattr(quality_page, "_load_profile", boom)
     at = open_tier("quality")
     at.text_input(key="qfile_0").set_value(str(bad)).run()
     texts = [e.value for e in at.error]
-    assert texts and all("Secret Dir" not in t and "/var/secret" not in t and "<file>" in t for t in texts), texts
+    assert texts and all("Secret Dir" not in t and "secret" not in t and "<file>" in t for t in texts), texts
