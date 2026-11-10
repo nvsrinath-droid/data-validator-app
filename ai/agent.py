@@ -31,10 +31,12 @@ TIMEOUT_ENV = "TRUEALIGN_LLM_TIMEOUT"
 # can outlive it. The call is therefore also given a hard total deadline: the timeout plus this grace period.
 HARD_DEADLINE_GRACE = 5.0
 # A thread that is past its deadline cannot be killed. Each one holds a connection until the provider lets go, so
-# once this many are still running, new calls are refused instead of piling up more.
+# once this many provider calls are in flight (for every user of the process together), new calls are refused
+# instead of piling up more. The count is taken under a lock when a call is admitted, not after it times out, so
+# concurrent callers cannot all pass the check before any of them is counted.
 MAX_ABANDONED_CALLS = 4
-_abandoned: list = []                 # worker threads that outlived their deadline and are still running
-_abandoned_lock = threading.Lock()
+_in_flight: set = set()               # worker threads that are still running, whether or not their caller gave up
+_in_flight_lock = threading.Lock()
 
 
 class TooManyHungCalls(Exception):
@@ -80,19 +82,25 @@ def _call_with_deadline(kwargs: dict, deadline: float):
             outcome["response"] = completion(**kwargs)
         except BaseException as e:                 # handed to the caller's thread below
             outcome["error"] = e
+        finally:
+            with _in_flight_lock:
+                _in_flight.discard(threading.current_thread())
 
-    with _abandoned_lock:
-        _abandoned[:] = [t for t in _abandoned if t.is_alive()]
-        if len(_abandoned) >= MAX_ABANDONED_CALLS:
-            raise TooManyHungCalls(
-                f"{len(_abandoned)} earlier requests to the AI provider are still hanging and cannot be cancelled. "
-                f"Wait for them to finish, check your network or provider status, or restart the app.")
     worker = threading.Thread(target=run, name="llm-call", daemon=True)
-    worker.start()
+    with _in_flight_lock:
+        if len(_in_flight) >= MAX_ABANDONED_CALLS:
+            raise TooManyHungCalls(
+                f"{len(_in_flight)} earlier requests to the AI provider are still hanging and cannot be cancelled. "
+                f"Wait for them to finish, check your network or provider status, or restart the app.")
+        _in_flight.add(worker)
+    try:
+        worker.start()
+    except BaseException:
+        with _in_flight_lock:
+            _in_flight.discard(worker)
+        raise
     worker.join(deadline)
     if worker.is_alive():
-        with _abandoned_lock:
-            _abandoned.append(worker)
         timeout = litellm.Timeout(message=f"no answer within {deadline:g} seconds in total",
                                   model=kwargs["model"], llm_provider=provider_of(kwargs["model"]))
         timeout.waited = deadline                  # what the user actually waited, for the message

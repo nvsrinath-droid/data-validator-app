@@ -126,7 +126,7 @@ def hung_calls(monkeypatch):
     calls = []
     monkeypatch.setenv("TRUEALIGN_LLM_TIMEOUT", "0.05")
     monkeypatch.setattr(agent_mod, "HARD_DEADLINE_GRACE", 0.05)
-    monkeypatch.setattr(agent_mod, "_abandoned", [])
+    monkeypatch.setattr(agent_mod, "_in_flight", set())
     monkeypatch.setattr(agent_mod, "completion", lambda **kw: (calls.append(kw), release.wait(30))[1])
     yield release, calls
     release.set()
@@ -157,19 +157,46 @@ def test_calls_are_accepted_again_once_the_hung_ones_finish(hung_calls, monkeypa
     with pytest.raises(RuntimeError, match="still hanging"):
         agent._call_llm("hi")
     release.set()                                                   # the provider finally answers the old call
-    for t in list(agent_mod._abandoned):
+    for t in list(agent_mod._in_flight):
         t.join(5)
     monkeypatch.setattr(agent_mod, "completion", mocked_completion())
     assert agent._call_llm("hi") == "hello"
-    assert agent_mod._abandoned == []
+    assert agent_mod._in_flight == set()
+
+
+def test_twenty_concurrent_calls_never_exceed_the_cap(hung_calls, monkeypatch):
+    release, calls = hung_calls
+    monkeypatch.setattr(agent_mod, "MAX_ABANDONED_CALLS", 4)
+    start = threading.Barrier(20)
+    outcomes, lock = [], threading.Lock()
+
+    def one_call():
+        start.wait()                                                # all 20 at the same moment
+        try:
+            AIAgent("deepseek/deepseek-chat", "k")._call_llm("hi")
+            result = "ok"
+        except RuntimeError as e:
+            result = "refused" if "still hanging" in str(e) else "timeout"
+        with lock:
+            outcomes.append(result)
+
+    threads = [threading.Thread(target=one_call) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert len(outcomes) == 20
+    assert len(calls) == 4                                          # only the cap ever reached the provider
+    assert outcomes.count("timeout") == 4 and outcomes.count("refused") == 16
+    assert len(agent_mod._in_flight) == 4
 
 
 def test_a_call_that_finishes_before_its_deadline_is_never_counted(monkeypatch):
-    monkeypatch.setattr(agent_mod, "_abandoned", [])
+    monkeypatch.setattr(agent_mod, "_in_flight", set())
     monkeypatch.setattr(agent_mod, "completion", mocked_completion())
     for _ in range(agent_mod.MAX_ABANDONED_CALLS + 2):
         assert AIAgent("deepseek/deepseek-chat", "k")._call_llm("hi") == "hello"
-    assert agent_mod._abandoned == []
+    assert agent_mod._in_flight == set()
 
 
 # ---- no retries, hard total deadline -----------------------------------------------------------
@@ -186,7 +213,7 @@ def test_a_call_that_ignores_its_own_timeout_is_abandoned_at_the_hard_deadline(m
     monkeypatch.setenv("TRUEALIGN_LLM_TIMEOUT", "0.2")
     monkeypatch.setattr(agent_mod, "HARD_DEADLINE_GRACE", 0.3)
     monkeypatch.setattr(agent_mod, "completion", lambda **kw: release.wait(30))   # a hung connection
-    monkeypatch.setattr(agent_mod, "_abandoned", [])
+    monkeypatch.setattr(agent_mod, "_in_flight", set())
     started = time.time()
     try:
         with pytest.raises(RuntimeError) as err:
