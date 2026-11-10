@@ -30,17 +30,15 @@ TIMEOUT_ENV = "TRUEALIGN_LLM_TIMEOUT"
 # LiteLLM's `timeout` limits one HTTP attempt, and some providers' SDKs apply it per read, so a slow trickle of bytes
 # can outlive it. The call is therefore also given a hard total deadline: the timeout plus this grace period.
 HARD_DEADLINE_GRACE = 5.0
-# A thread that is past its deadline cannot be killed. Each one holds a connection until the provider lets go, so
-# once this many provider calls are in flight (for every user of the process together), new calls are refused
-# instead of piling up more. The count is taken under a lock when a call is admitted, not after it times out, so
-# concurrent callers cannot all pass the check before any of them is counted.
-MAX_ABANDONED_CALLS = 4
+# A thread that is past its deadline cannot be killed, so cap the provider calls in flight (all users together).
+# Counted under a lock when a call is admitted, so concurrent callers cannot all pass the check first.
+MAX_IN_FLIGHT_CALLS = 12
 _in_flight: set = set()               # worker threads that are still running, whether or not their caller gave up
 _in_flight_lock = threading.Lock()
 
 
 class TooManyHungCalls(Exception):
-    """Refused without calling the provider: too many earlier calls are still hanging."""
+    """Refused without calling the provider: too many AI requests are already in flight."""
 MAX_SUGGESTED_CHECKS = 50
 
 
@@ -88,10 +86,8 @@ def _call_with_deadline(kwargs: dict, deadline: float):
 
     worker = threading.Thread(target=run, name="llm-call", daemon=True)
     with _in_flight_lock:
-        if len(_in_flight) >= MAX_ABANDONED_CALLS:
-            raise TooManyHungCalls(
-                f"{len(_in_flight)} earlier requests to the AI provider are still hanging and cannot be cancelled. "
-                f"Wait for them to finish, check your network or provider status, or restart the app.")
+        if len(_in_flight) >= MAX_IN_FLIGHT_CALLS:
+            raise TooManyHungCalls("Too many AI requests are running at once. Wait a moment and try again.")
         _in_flight.add(worker)
     try:
         worker.start()

@@ -134,7 +134,7 @@ def hung_calls(monkeypatch):
 
 def test_after_the_cap_of_hung_calls_new_calls_are_refused_without_contacting_the_provider(hung_calls, monkeypatch):
     release, calls = hung_calls
-    monkeypatch.setattr(agent_mod, "MAX_ABANDONED_CALLS", 2)
+    monkeypatch.setattr(agent_mod, "MAX_IN_FLIGHT_CALLS", 2)
     agent = AIAgent("deepseek/deepseek-chat", "sk-secret")
     for _ in range(2):
         with pytest.raises(RuntimeError, match="did not answer"):
@@ -144,17 +144,18 @@ def test_after_the_cap_of_hung_calls_new_calls_are_refused_without_contacting_th
         agent._call_llm("hi")
     text = str(err.value)
     assert len(calls) == 2                                          # the third never reached completion()
-    assert "2 earlier requests" in text and "still hanging" in text and "restart" in text
+    assert text == "Too many AI requests are running at once. Wait a moment and try again."
+    assert "hanging" not in text
     assert "sk-secret" not in text and not text.startswith("LLM Provider Error")
 
 
 def test_calls_are_accepted_again_once_the_hung_ones_finish(hung_calls, monkeypatch):
     release, calls = hung_calls
-    monkeypatch.setattr(agent_mod, "MAX_ABANDONED_CALLS", 1)
+    monkeypatch.setattr(agent_mod, "MAX_IN_FLIGHT_CALLS", 1)
     agent = AIAgent("deepseek/deepseek-chat", "k")
     with pytest.raises(RuntimeError, match="did not answer"):
         agent._call_llm("hi")
-    with pytest.raises(RuntimeError, match="still hanging"):
+    with pytest.raises(RuntimeError, match="running at once"):
         agent._call_llm("hi")
     release.set()                                                   # the provider finally answers the old call
     for t in list(agent_mod._in_flight):
@@ -166,7 +167,8 @@ def test_calls_are_accepted_again_once_the_hung_ones_finish(hung_calls, monkeypa
 
 def test_twenty_concurrent_calls_never_exceed_the_cap(hung_calls, monkeypatch):
     release, calls = hung_calls
-    monkeypatch.setattr(agent_mod, "MAX_ABANDONED_CALLS", 4)
+    cap = agent_mod.MAX_IN_FLIGHT_CALLS
+    assert cap == 12
     start = threading.Barrier(20)
     outcomes, lock = [], threading.Lock()
 
@@ -176,7 +178,7 @@ def test_twenty_concurrent_calls_never_exceed_the_cap(hung_calls, monkeypatch):
             AIAgent("deepseek/deepseek-chat", "k")._call_llm("hi")
             result = "ok"
         except RuntimeError as e:
-            result = "refused" if "still hanging" in str(e) else "timeout"
+            result = "refused" if "running at once" in str(e) else "timeout"
         with lock:
             outcomes.append(result)
 
@@ -186,15 +188,15 @@ def test_twenty_concurrent_calls_never_exceed_the_cap(hung_calls, monkeypatch):
     for t in threads:
         t.join(10)
     assert len(outcomes) == 20
-    assert len(calls) == 4                                          # only the cap ever reached the provider
-    assert outcomes.count("timeout") == 4 and outcomes.count("refused") == 16
-    assert len(agent_mod._in_flight) == 4
+    assert len(calls) == cap                                        # only the cap ever reached the provider
+    assert outcomes.count("timeout") == cap and outcomes.count("refused") == 20 - cap
+    assert len(agent_mod._in_flight) == cap
 
 
 def test_a_call_that_finishes_before_its_deadline_is_never_counted(monkeypatch):
     monkeypatch.setattr(agent_mod, "_in_flight", set())
     monkeypatch.setattr(agent_mod, "completion", mocked_completion())
-    for _ in range(agent_mod.MAX_ABANDONED_CALLS + 2):
+    for _ in range(agent_mod.MAX_IN_FLIGHT_CALLS + 2):
         assert AIAgent("deepseek/deepseek-chat", "k")._call_llm("hi") == "hello"
     assert agent_mod._in_flight == set()
 
