@@ -12,7 +12,8 @@ from typing import Optional
 import streamlit as st
 
 ALLOWED_EXTENSIONS = (".csv", ".xlsx", ".xls")
-LOCAL_PATHS_ENV = "TRUEALIGN_ALLOW_LOCAL_PATHS"
+SQLITE_EXTENSIONS = (".db", ".sqlite", ".sqlite3")
+LOCAL_PATHS_ENV ="TRUEALIGN_ALLOW_LOCAL_PATHS"
 
 
 def local_paths_allowed() -> bool:
@@ -309,6 +310,12 @@ def resolve_input(upload, path: str, prefix: str) -> Optional[str]:
             st.error(f"❌ {e}")
             return None
     release_input(prefix)
+    return validated_path(path)
+
+
+def validated_path(path: str, extensions: tuple = ALLOWED_EXTENSIONS) -> Optional[str]:
+    """A typed server-side path -> the normalised path if it is allowed and readable, else None (with a generic
+    error shown). Network paths and wrong extensions are refused before the disk is looked at."""
     if path and local_paths_allowed():
         cleaned = clean_path(path)
         if not cleaned:
@@ -317,9 +324,9 @@ def resolve_input(upload, path: str, prefix: str) -> Optional[str]:
         if is_network_path(cleaned) or is_network_path(norm_path):   # whichever spelling Windows would resolve
             st.error("❌ Network (UNC) paths are not allowed. Use a path on this machine, or upload the file.")
             return None
-        if not norm_path.lower().endswith(ALLOWED_EXTENSIONS):
+        if not norm_path.lower().endswith(extensions):
             # Checked before the file is looked up, so the message does not reveal whether a path exists.
-            st.error(f"❌ Only {', '.join(ALLOWED_EXTENSIONS)} files can be opened by path.")
+            st.error(f"❌ Only {', '.join(extensions)} files can be opened by path.")
             return None
         if os.path.isdir(norm_path):
             st.error("❌ That path is a folder. Give the path of the file itself.")

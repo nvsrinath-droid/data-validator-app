@@ -135,6 +135,32 @@ def test_ordinary_paths_are_not_mistaken_for_network_paths(spaced_csv):
     assert not any(is_network_path(p) for p in (spaced_csv, WIN, "/tmp/x.csv", "relative/x.csv", "C:/a/b.csv"))
 
 
+# ---- the SQLite "Database File Path" box ------------------------------------------------------------
+
+def open_sqlite_box():
+    at = open_tier("pushdown")
+    at.selectbox(key="db_type_pd").set_value("SQLite (Local)").run()
+    return at
+
+
+@pytest.mark.parametrize("value", [r"\\host\share\x.db", r"/\host\share\x.db", "//host/share/x.db",
+                                   '"' + r"\\host\share\x.db" + '"'])
+def test_the_sqlite_box_refuses_network_paths(value):
+    at = open_sqlite_box()
+    at.text_input(key="sqlite_pd").set_value(value).run()
+    assert not at.exception, at.exception
+    assert any("Network (UNC) paths are not allowed" in e.value for e in at.error), [e.value for e in at.error]
+
+
+def test_the_sqlite_box_refuses_other_extensions_and_missing_files(tmp_path):
+    at = open_sqlite_box()
+    at.text_input(key="sqlite_pd").set_value(str(tmp_path / "notes.txt")).run()
+    assert any("Only .db" in e.value for e in at.error)
+    at.text_input(key="sqlite_pd").set_value(str(tmp_path / "missing.db")).run()
+    assert any("not found" in e.value for e in at.error)
+    assert str(tmp_path) not in " ".join(e.value for e in at.error)
+
+
 # ---- the massive-files tier ---------------------------------------------------------------------
 
 def test_heavy_tier_opens_two_paths_with_spaces(spaced_csv):
