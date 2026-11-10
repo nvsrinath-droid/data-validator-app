@@ -1,6 +1,7 @@
 """Input helpers shared by the file-based tiers."""
 import os
 import re
+import secrets
 import shutil
 import tempfile
 import time
@@ -70,6 +71,7 @@ def is_network_path(cleaned: str) -> bool:
 STORE_DIR_PREFIX = "truealign_uploads_"
 LEGACY_PREFIX = "truealign_"            # uploads used to be loose files named truealign_<tier>_<id>_<name>
 STALE_AFTER_SECONDS = 24 * 3600
+_MARKER = ".truealign_store"
 _SAFE = re.compile(r"[^A-Za-z0-9_-]")
 _swept = False
 # Paths (files, or whole session folders) that could not be deleted, usually because Windows still had them open.
@@ -154,18 +156,43 @@ class UploadStore:
     def __init__(self, parent: Optional[str] = None):
         self._parent = parent
         self._slots = {}                                 # slot -> (upload id, path)
-        self.dir = tempfile.mkdtemp(prefix=STORE_DIR_PREFIX, dir=parent)
+        self._token = secrets.token_hex(16)
+        self.dir = self._make_dir()
         self._finalizer = weakref.finalize(self, _delete, self.dir)
+
+    def _make_dir(self) -> str:
+        """A new private folder holding a marker file with this store's secret token. The marker is how we later
+        recognise the folder as the one we created (see _ensure_dir)."""
+        new_dir = tempfile.mkdtemp(prefix=STORE_DIR_PREFIX, dir=self._parent)
+        try:
+            fd = os.open(os.path.join(new_dir, _MARKER), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+                         0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(self._token)
+        except BaseException:
+            _delete(new_dir)
+            raise
+        return new_dir
+
+    def _is_ours(self) -> bool:
+        """True only for the folder this store created: a real directory (not a link) that holds our marker."""
+        try:
+            if os.path.islink(self.dir) or not os.path.isdir(self.dir):
+                return False
+            with open(os.path.join(self.dir, _MARKER), "r") as f:
+                return f.read() == self._token
+        except OSError:
+            return False
 
     def _ensure_dir(self) -> None:
         """Something outside the app (another instance's sweep, Storage Sense, a temp cleaner) removed the folder
-        while the session was open. Make a new private one, never re-create the old name: a folder that appeared
-        under that name since is not ours. Files from the old folder are gone, so their slots are forgotten and
-        the next put writes them again."""
-        if os.path.isdir(self.dir):
+        while the session was open, or a different folder now sits under its name. Never adopt an existing folder:
+        unless it carries our marker it is not ours, so make a new private one and forget the old name. Files from
+        the old folder are gone, so their slots are forgotten and the next put writes them again."""
+        if self._is_ours():
             return
         try:
-            new_dir = tempfile.mkdtemp(prefix=STORE_DIR_PREFIX, dir=self._parent)
+            new_dir = self._make_dir()
         except OSError as e:
             raise UploadError(f"The upload folder could not be created ({e.strerror or type(e).__name__}).") from None
         self._finalizer.detach()
@@ -229,7 +256,7 @@ class UploadStore:
             self.release(slot)
 
     def files(self) -> list:
-        return sorted(os.listdir(self.dir)) if os.path.isdir(self.dir) else []
+        return sorted(n for n in os.listdir(self.dir) if n != _MARKER) if os.path.isdir(self.dir) else []
 
     def touch(self) -> None:
         """Mark the folder as in use. Also brings it back if it was deleted under a live session."""

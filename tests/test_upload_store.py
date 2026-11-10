@@ -297,6 +297,21 @@ def test_the_folder_is_recreated_by_the_per_rerun_touch_too(store):
     assert Path(store.put("quality", FakeUpload())).is_file()       # and the same upload is written again
 
 
+def test_a_folder_planted_under_the_old_session_name_is_not_adopted(store, tmp_path):
+    store.put("quality", FakeUpload())
+    old_dir = store.dir
+    shutil.rmtree(old_dir)
+    os.mkdir(old_dir)                                               # someone else takes the freed name
+    planted_file = Path(old_dir) / "planted.csv"
+    planted_file.write_text("x\n")
+    path = store.put("quality", FakeUpload())
+    assert store.dir != old_dir and Path(path).parent == Path(store.dir)
+    assert planted_file.read_text() == "x\n"                        # left alone, and nothing of ours written in it
+    assert [p.name for p in Path(old_dir).iterdir()] == ["planted.csv"]
+    store.touch()
+    assert store.dir != old_dir
+
+
 def test_a_recreated_folder_is_the_one_removed_at_session_end(tmp_path):
     s = UploadStore(parent=str(tmp_path))
     s.put("quality", FakeUpload())
