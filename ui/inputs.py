@@ -13,7 +13,7 @@ import streamlit as st
 
 ALLOWED_EXTENSIONS = (".csv", ".xlsx", ".xls")
 SQLITE_EXTENSIONS = (".db", ".sqlite", ".sqlite3")
-LOCAL_PATHS_ENV ="TRUEALIGN_ALLOW_LOCAL_PATHS"
+LOCAL_PATHS_ENV = "TRUEALIGN_ALLOW_LOCAL_PATHS"
 
 
 def local_paths_allowed() -> bool:
