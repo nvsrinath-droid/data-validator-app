@@ -1,6 +1,10 @@
 import json
+import os
+import threading
+import warnings
 from typing import List, Optional, Tuple
 
+import litellm
 from litellm import completion, get_llm_provider
 from pydantic import TypeAdapter, ValidationError
 
@@ -11,7 +15,97 @@ from core.quality.specs import CheckSpec, Freshness, Outliers, QualityResult, Re
 from core.rules import RuleSpec, parse_rule
 from core.schemas import ValidationConfig
 
+def silence_litellm_serializer_warning() -> None:
+    """LiteLLM dumps its own response objects with pydantic after every call, and pydantic reports "Pydantic
+    serializer warnings ... serialized value may not be as expected" for them. It is noise from inside LiteLLM
+    (we never serialise those objects), and it lands in the user's console once per call. Only that message is
+    ignored. A process-wide filter, not catch_warnings(), because catch_warnings is not thread-safe and Streamlit
+    runs one thread per session. Idempotent: warnings.filterwarnings replaces an identical filter."""
+    warnings.filterwarnings("ignore", message=r"Pydantic serializer warnings", category=UserWarning)
+
+
+silence_litellm_serializer_warning()
+DEFAULT_LLM_TIMEOUT = 60.0
+TIMEOUT_ENV = "TRUEALIGN_LLM_TIMEOUT"
+# LiteLLM's `timeout` limits one HTTP attempt, and some providers' SDKs apply it per read, so a slow trickle of bytes
+# can outlive it. The call is therefore also given a hard total deadline: the timeout plus this grace period.
+HARD_DEADLINE_GRACE = 5.0
+# A thread that is past its deadline cannot be killed, so cap the provider calls in flight (all users together).
+# Counted under a lock when a call is admitted, so concurrent callers cannot all pass the check first.
+MAX_IN_FLIGHT_CALLS = 12
+_in_flight: set = set()               # worker threads that are still running, whether or not their caller gave up
+_in_flight_lock = threading.Lock()
+
+
+class TooManyHungCalls(Exception):
+    """Refused without calling the provider: too many AI requests are already in flight."""
 MAX_SUGGESTED_CHECKS = 50
+
+
+def llm_timeout() -> float:
+    """Seconds to wait for a provider before giving up. TRUEALIGN_LLM_TIMEOUT overrides the default (60);
+    a value that is not a positive number is ignored rather than turned into "wait forever"."""
+    try:
+        value = float(os.environ.get(TIMEOUT_ENV, ""))
+    except ValueError:
+        return DEFAULT_LLM_TIMEOUT
+    return value if value > 0 and value != float("inf") else DEFAULT_LLM_TIMEOUT
+
+
+def friendly_llm_error(exc: Exception, model: str, timeout: float) -> str:
+    """One plain sentence for the failures a user can act on. Anything else keeps the provider's own text."""
+    if isinstance(exc, litellm.Timeout):          # before APIConnectionError, which it subclasses
+        waited = getattr(exc, "waited", timeout)  # the hard deadline waited longer than the per-attempt timeout
+        return (f"{model} did not answer within {waited:g} seconds. Try again, pick a faster model, or raise "
+                f"{TIMEOUT_ENV}.")
+    if isinstance(exc, litellm.AuthenticationError):
+        return f"The provider rejected the API key for {model}. Check the key in Settings."
+    if isinstance(exc, litellm.RateLimitError):
+        return (f"The provider is rate-limiting {model} (or the account is out of quota). Wait a moment and try "
+                f"again.")
+    if isinstance(exc, litellm.NotFoundError):
+        return f"{model} was not found at the provider. Check the model name."
+    if isinstance(exc, (litellm.APIConnectionError, litellm.ServiceUnavailableError)):
+        return f"Could not reach the provider for {model}. Check your network connection and try again."
+    return ""
+
+
+def _call_with_deadline(kwargs: dict, deadline: float):
+    """completion(**kwargs), abandoned after `deadline` seconds in total. The call runs in a daemon thread, which
+    cannot be killed: on expiry it is left to finish (its result is discarded) and the caller gets a Timeout."""
+    outcome = {}
+
+    def run():
+        try:
+            outcome["response"] = completion(**kwargs)
+        except BaseException as e:                 # handed to the caller's thread below
+            outcome["error"] = e
+        finally:
+            with _in_flight_lock:
+                _in_flight.discard(threading.current_thread())
+
+    worker = threading.Thread(target=run, name="llm-call", daemon=True)
+    with _in_flight_lock:
+        if len(_in_flight) >= MAX_IN_FLIGHT_CALLS:
+            raise TooManyHungCalls("Too many AI requests are running at once. Wait a moment and try again.")
+        _in_flight.add(worker)
+    try:
+        worker.start()
+    except BaseException:
+        with _in_flight_lock:
+            _in_flight.discard(worker)
+        raise
+    worker.join(deadline)
+    if worker.is_alive():
+        timeout = litellm.Timeout(message=f"no answer within {deadline:g} seconds in total",
+                                  model=kwargs["model"], llm_provider=provider_of(kwargs["model"]))
+        timeout.waited = deadline                  # what the user actually waited, for the message
+        raise timeout
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["response"]
+
+
 _CHECK_ADAPTER = TypeAdapter(CheckSpec)
 
 
@@ -60,17 +154,22 @@ class AIAgent:
             "model": self.model_name,
             "messages": [{"role": "user", "content": prompt}],
             "api_key": self.api_key,
+            "timeout": llm_timeout(),
+            "max_retries": 0,        # a retry would silently multiply the wait; the user can press the button again
         }
         provider = provider_of(self.model_name)
         if provider in TEMPERATURE_PROVIDERS:
             kwargs["temperature"] = 0
         if is_json and provider in JSON_MODE_PROVIDERS:
             kwargs["response_format"] = {"type": "json_object"}
+        silence_litellm_serializer_warning()   # a test runner or library may have reset the filters since import
         try:
-            response = completion(**kwargs)
+            response = _call_with_deadline(kwargs, kwargs["timeout"] + HARD_DEADLINE_GRACE)
             return response.choices[0].message.content
+        except TooManyHungCalls as e:                  # not the provider's fault: no "LLM Provider Error" prefix
+            raise RuntimeError(str(e)) from None
         except Exception as e:
-            message = str(e)
+            message = friendly_llm_error(e, self.model_name, kwargs["timeout"]) or str(e)
             if self.api_key:
                 message = message.replace(self.api_key, "***")
             raise RuntimeError(f"LLM Provider Error: {message}") from None

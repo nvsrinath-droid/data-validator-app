@@ -20,7 +20,7 @@ def save_baseline(profile: TableProfile, path: str) -> None:
 
 
 def load_baseline(path: str) -> TableProfile:
-    return TableProfile.from_json(Path(path).read_text(encoding="utf-8"))
+    return TableProfile.from_json(Path(path).read_text(encoding="utf-8-sig"))
 
 
 def compare_profiles(baseline: TableProfile, current: TableProfile, null_pct_delta: float = NULL_PCT_DELTA) -> List[str]:

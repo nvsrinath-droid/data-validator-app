@@ -3,7 +3,8 @@
 URLs are built with SQLAlchemy's URL.create(), so passwords containing @ : / % # etc.
 work without manual escaping, and the password is masked whenever the URL is printed.
 """
-from typing import List, Optional
+import re
+from typing import Iterable, List, Optional
 
 import pandas as pd
 from sqlalchemy import create_engine
@@ -58,11 +59,49 @@ def build_url(db_type: str, host: str = "", port: str = "", database: str = "",
     raise ValueError(f"Unsupported database type: {db_type}")
 
 
+def sqlite_file_of(url) -> List[str]:
+    """The database file of a SQLite URL as a one-item list (empty for any other database), ready to pass to
+    scrub_paths as a known path."""
+    if isinstance(url, URL) and url.get_backend_name() == "sqlite" and url.database:
+        return [url.database]
+    return []
+
+
 def redact(message: str, url: Optional[URL]) -> str:
     """Remove the password from an error message before showing it to the user."""
     if url is not None and url.password:
         message = message.replace(str(url.password), "***")
     return message
+
+
+_SEP = r"[\\/]+"        # / and \ alike, and any run of them: Python repr() doubles every backslash in an error
+# A path we did not get told about is only recognised when it is quoted (as OSError, DuckDB and pandas quote file
+# names) and starts like a Windows path: a drive letter ("C:\" or "C:/") or "\\" (UNC, or its repr() form).
+_QUOTED_WINDOWS_PATH = re.compile(
+    r"""(?P<q>['"])(?:[A-Za-z]:[\\/]|\\\\)(?:(?!(?P=q))[^\r\n])*(?P=q)""")
+
+
+def _known_path_pattern(path: str) -> Optional[str]:
+    """A regex for one known path that matches it in every separator spelling (/, \\, doubled, mixed)."""
+    parts = [p for p in re.split(_SEP, path)]
+    if not any(parts):
+        return None                                   # "/" or "\\" alone would match every slash in the message
+    return _SEP.join(re.escape(p) for p in parts)
+
+
+def scrub_paths(message: str, known: Iterable[str] = ()) -> str:
+    r"""Replace file-system paths in an error message with <file> before showing it to the user: the text of a
+    pandas / DuckDB / OS error can name the server's folders (the private upload folder, the temp directory, the
+    file the user typed).
+    - `known` paths (the typed path, the upload paths) are replaced wherever they appear, ignoring case and with
+      any separator spelling, so spaces and a missing extension do not matter.
+    - Any other path is replaced only when it is quoted and starts with a drive letter or \\. Everything else is
+      left alone, so "Debit / Credit", "N / A", "CORP\jdoe", URLs and dates survive. A path that is neither known
+      nor quoted in that way is not recognised: pass it in `known`."""
+    patterns = sorted({pat for p in known if p and (pat := _known_path_pattern(str(p)))}, key=len, reverse=True)
+    if patterns:
+        message = re.sub("|".join(patterns), "<file>", message, flags=re.IGNORECASE)
+    return _QUOTED_WINDOWS_PATH.sub(lambda m: m.group("q") + "<file>" + m.group("q"), message)
 
 
 def get_engine(url) -> Engine:

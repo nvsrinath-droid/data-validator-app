@@ -3,7 +3,7 @@ import streamlit as st
 from core.sources import FilePair
 
 from ..components import render_mapping_workflow
-from ..inputs import local_paths_allowed, path_input, resolve_input
+from ..inputs import local_paths_allowed, path_input, release_input, resolve_input
 
 
 def render():
@@ -21,6 +21,9 @@ def render():
         upload_2 = st.file_uploader("Upload Target File", type=["csv", "xlsx", "xls"], key=f"hup2_{uk}")
         path_2 = path_input("OR: Local File Path 2 (if running locally)", f"hfile2_{uk}")
 
+    for slot, upload in (("heavy1", upload_1), ("heavy2", upload_2)):
+        if not upload:
+            release_input(slot)                 # the file was removed from the uploader: delete its temp copy
     if not ((upload_1 or path_1) and (upload_2 or path_2)):
         return
     file_1 = resolve_input(upload_1, path_1, "heavy1")

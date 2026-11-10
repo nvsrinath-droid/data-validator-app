@@ -2,7 +2,7 @@ import streamlit as st
 
 from connectors.file_connector import FileConnector
 from connectors.sql_connector import SQLConnector
-from core.db import redact
+from core.db import redact, scrub_paths, sqlite_file_of
 from core.sources import ConnectorPair
 
 from ..components import render_mapping_workflow, render_sql_form
@@ -38,11 +38,12 @@ def render():
     try:
         (conn1, sig1), (conn2, sig2) = _connector(source_1), _connector(source_2)
     except Exception as e:
-        msg = str(e)
+        msg, known = str(e), []
         for src in (source_1, source_2):
             if isinstance(src, dict):
                 msg = redact(msg, src["url"])
-        st.error(f"Error connecting to data source: {msg}")
+                known += sqlite_file_of(src["url"])
+        st.error(f"Error connecting to data source: {scrub_paths(msg, known)}")
         return
 
     render_mapping_workflow(ConnectorPair(conn1, conn2, signature=(sig1, sig2)), "std",

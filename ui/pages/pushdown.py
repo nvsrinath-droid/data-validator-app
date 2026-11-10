@@ -1,6 +1,6 @@
 import streamlit as st
 
-from core.db import redact
+from core.db import redact, scrub_paths, sqlite_file_of
 from core.engines.sql_pushdown import DEFAULT_SAMPLE_LIMIT
 from core.sources import PushdownPair
 
@@ -33,7 +33,7 @@ def render():
     try:
         pair = PushdownPair(url, q1, q2, sample_limit=int(sample_limit))
     except Exception as e:
-        st.error(f"Database connection failed: {redact(str(e), url)}")
+        st.error(f"Database connection failed: {scrub_paths(redact(str(e), url), sqlite_file_of(url))}")
         return
 
     render_mapping_workflow(pair, "pd", run_label="🚀 Run Enterprise Warehouse Comparison (Pushdown)",

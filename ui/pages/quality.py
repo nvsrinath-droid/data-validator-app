@@ -5,14 +5,15 @@ import pandas as pd
 import streamlit as st
 
 from ai.agent import AIAgent
+from core.db import scrub_paths
 from core.quality.engine import QualityEngine
 from core.quality.profile import profile_file
 from core.quality.report import report_json, results_csv
 from core.quality.specs import QualityConfig, QualityResult
 
 from ..components import model_picker
-from ..inputs import local_paths_allowed, path_input, resolve_input
-from ..quality_grid import CHECK_TYPES, empty_frame, frame_to_specs, non_blank_rows, specs_to_frame
+from ..inputs import local_paths_allowed, path_input, release_input, resolve_input
+from ..quality_grid import CHECK_TYPES, empty_frame, frame_to_specs, new_checks, non_blank_rows, specs_to_frame
 
 PRIVACY_NOTE = "Only column statistics are sent, no rows."
 HEADER_WARNING = ("If your file has no header row, its first row is used as the column names, and column names are "
@@ -91,10 +92,16 @@ def _suggest_checks(agent: AIAgent, profile, current_rows: pd.DataFrame, hide: b
     except Exception as e:
         st.error(f"Failed to get suggestions: {e}")
         return
+    existing, _ = frame_to_specs(current_rows, [c.name for c in profile.columns])
+    suggested, skipped = new_checks(existing, suggested)
+    summary = [f"Added {len(suggested)} suggested check(s) to the grid. Review them, then run."] if suggested         else ["The model suggested no new checks."]
+    if skipped:
+        summary.append(f"Skipped {skipped} suggestion(s) that were already in the grid.")
+    ss.quality_notes = summary + list(notes)
+    if not suggested:
+        st.rerun()                                     # nothing to add: keep the grid and the current results
     # Append to the grid exactly as the user has it, so a row with an error is kept for them to fix.
     ss.quality_checks = pd.concat([non_blank_rows(current_rows), specs_to_frame(suggested)], ignore_index=True)
-    ss.quality_notes = ([f"Added {len(suggested)} suggested check(s) to the grid. Review them, then run."]
-                        + list(notes))
     ss.pop("quality_result", None)
     ss.pop("quality_explanation", None)
     ss.config_version += 1  # a new widget key makes the grid pick up the new rows
@@ -152,6 +159,8 @@ def render():
     uk = ss.uploader_key
     upload = st.file_uploader("Upload File", type=["csv", "xlsx", "xls"], key=f"qup_{uk}")
     local_path = path_input("OR: Local File Path (if running locally)", f"qfile_{uk}")
+    if not upload:
+        release_input("quality")                # the file was removed from the uploader: delete its temp copy
     if not (upload or local_path):
         return
     path = resolve_input(upload, local_path, "quality")
@@ -161,7 +170,7 @@ def render():
         profile = _load_profile(path)
     except Exception as e:  # unreadable file, bad Excel, DuckDB parse error: say so, keep the app alive
         ss.pop("quality_source", None)
-        st.error(f"Could not read the file: {e}")
+        st.error(f"Could not read the file: {scrub_paths(str(e), [path])}")
         return
 
     st.subheader("🔎 Profile")
@@ -195,6 +204,6 @@ def render():
                 ss.quality_result = QualityEngine(specs).run(path)
             except Exception as e:
                 ss.pop("quality_result", None)
-                st.error(f"Could not run the checks: {e}")
+                st.error(f"Could not run the checks: {scrub_paths(str(e), [path])}")
     if ss.get("quality_result") is not None:
         _render_result(ss.quality_result, specs, agent, hide, extremes)
