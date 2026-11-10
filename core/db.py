@@ -59,6 +59,14 @@ def build_url(db_type: str, host: str = "", port: str = "", database: str = "",
     raise ValueError(f"Unsupported database type: {db_type}")
 
 
+def sqlite_file_of(url) -> List[str]:
+    """The database file of a SQLite URL as a one-item list (empty for any other database), ready to pass to
+    scrub_paths as a known path."""
+    if isinstance(url, URL) and url.get_backend_name() == "sqlite" and url.database:
+        return [url.database]
+    return []
+
+
 def redact(message: str, url: Optional[URL]) -> str:
     """Remove the password from an error message before showing it to the user."""
     if url is not None and url.password:

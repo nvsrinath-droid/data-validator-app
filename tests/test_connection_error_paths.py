@@ -46,6 +46,50 @@ def test_pushdown_connection_failure_names_no_path(tmp_path, monkeypatch):
     assert "<file>" in messages[0]
 
 
+def unquoted_error(db):
+    return OSError(f"unable to open database file {db} because it is locked")     # the typed path, no quotes
+
+
+def test_pushdown_error_with_an_unquoted_typed_path_with_spaces_is_scrubbed(tmp_path, monkeypatch):
+    db, _ = leaky(tmp_path)
+    error = unquoted_error(db)
+
+    def boom(*args, **kwargs):
+        raise error
+    monkeypatch.setattr(pushdown_page, "PushdownPair", boom)
+    at = open_tier("pushdown")
+    at.selectbox(key="db_type_pd").set_value("SQLite (Local)").run()
+    at.text_input(key="sqlite_pd").set_value(str(db)).run()
+    at.text_area(key="pd_q1").set_value("SELECT 1").run()
+    at.text_area(key="pd_q2").set_value("SELECT 1").run()
+    assert not at.exception, at.exception
+    messages = [e.value for e in at.error]
+    assert messages == ["Database connection failed: unable to open database file <file> because it is locked"], messages
+
+
+def test_standard_error_with_an_unquoted_typed_path_with_spaces_is_scrubbed(tmp_path, monkeypatch):
+    db, _ = leaky(tmp_path)
+    error = unquoted_error(db)
+
+    def boom(*args, **kwargs):
+        raise error
+    monkeypatch.setattr(standard_page, "SQLConnector", boom)
+    at = open_tier("standard")
+    for radio in at.radio:
+        radio.set_value("SQL Database")
+    at.run()
+    for side in ("src1", "src2"):
+        at.selectbox(key=f"db_type_{side}_0").set_value("SQLite (Local)")
+    at.run()
+    for side in ("src1", "src2"):
+        at.text_input(key=f"sqlite_{side}_0").set_value(str(db))
+        at.text_area(key=f"q_{side}_0").set_value("SELECT 1")
+    at.run()
+    assert not at.exception, at.exception
+    messages = [e.value for e in at.error]
+    assert messages == ["Error connecting to data source: unable to open database file <file> because it is locked"], messages
+
+
 def test_standard_connection_failure_names_no_path(tmp_path, monkeypatch):
     db, error = leaky(tmp_path)
 
